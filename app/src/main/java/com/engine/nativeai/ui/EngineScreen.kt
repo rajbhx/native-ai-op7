@@ -14,6 +14,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -55,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.engine.nativeai.AgentEvent
+import com.engine.nativeai.AgentState
 import com.engine.nativeai.CalculatorTool
 import com.engine.nativeai.EngineForegroundService
 import com.engine.nativeai.EngineConfig
@@ -109,6 +112,7 @@ fun EngineScreen(
     var output by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
     var serviceOn by remember { mutableStateOf(false) }
+    var engineState by remember { mutableStateOf(EngineUiState.READY) }
     var selectedMode by remember { mutableStateOf(modeIndexFor(prefs.routingMode)) }
     var selectedModelId by remember { mutableStateOf(prefs.lastSelectedModelId ?: "local-llama") }
     var favorites by remember { mutableStateOf(prefs.favorites()) }
@@ -139,11 +143,54 @@ fun EngineScreen(
         }
     }
 
-    val modes = listOf("Auto", "Free-First", "Free Only", "Offline")
+    val modes = listOf("AUTO", "FREE", "LOCAL", "OFFLINE")
     val routingModes = listOf(
-        RoutingMode.HYBRID, RoutingMode.FREE_FIRST, RoutingMode.FREE_ONLY, RoutingMode.OFFLINE_ONLY,
+        RoutingMode.HYBRID, RoutingMode.FREE_ONLY, RoutingMode.LOCAL_FIRST, RoutingMode.OFFLINE_ONLY,
     )
     val models = registry.list()
+    val selected = models.firstOrNull { it.id == selectedModelId }
+    val (connText, connOk) = when {
+        selected == null -> "not found" to false
+        selected.kind == ModelKind.LOCAL ->
+            if (modelFile.exists()) "Available" to true else "No model file" to false
+        else ->
+            if (providerRegistry.apiKey(selected.provider).isNotBlank()) "Connected" to true
+            else "Not connected" to false
+    }
+    // Real engine state, driven only by actual operations (never faked).
+    val headerState = if (routingModes[selectedMode] == RoutingMode.OFFLINE_ONLY &&
+        engineState == EngineUiState.READY
+    ) EngineUiState.OFFLINE else engineState
+
+    // Loads the local GGUF on demand so Agent/Generate work with one tap.
+    suspend fun ensureLocalLoaded(): Boolean {
+        if (loaded) return true
+        if (!modelFile.exists()) {
+            engineState = EngineUiState.ERROR
+            status = "Model not found:\n${modelFile.absolutePath}\nCopy a GGUF there, then retry."
+            return false
+        }
+        engineState = EngineUiState.LOADING
+        status = "loading model (threads=$threads)\u2026"
+        return try {
+            if (loaded) engine.close()
+            engine.init(
+                EngineConfig(
+                    modelFile.absolutePath,
+                    threads = threads,
+                    nativeLibDir = context.applicationInfo.nativeLibraryDir,
+                ),
+            )
+            loaded = true
+            engineState = EngineUiState.COMPLETED
+            status = "Model loaded: ${modelFile.name} (threads=$threads)"
+            true
+        } catch (e: Exception) {
+            engineState = EngineUiState.ERROR
+            status = "init failed: ${e.message}"
+            false
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -152,91 +199,183 @@ fun EngineScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
-        Text("NEVER SETTLE", color = OpText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Text("Native Agentic AI Engine · OnePlus 7", color = OpTextSecondary, fontSize = 12.sp)
-        Spacer(Modifier.height(10.dp))
-        Text(status, color = OpTextSecondary, fontSize = 12.sp)
-        Spacer(Modifier.height(10.dp))
-
-        OutlinedTextField(
-            value = prompt,
-            onValueChange = { prompt = it },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Prompt / task", color = OpTextSecondary) },
-            minLines = 2,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = OpRed,
-                unfocusedBorderColor = OpDivider,
-                cursorColor = OpRed,
-            ),
-        )
-        Spacer(Modifier.height(10.dp))
-
+        // ---------------- HEADER (real engine state) ----------------
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Threads", color = OpTextSecondary, fontSize = 11.sp)
-            Spacer(Modifier.width(8.dp))
-            listOf(2, 3, 4, 5, 6).forEach { n ->
-                SegmentedPill(
-                    "$n",
-                    selected = threads == n,
-                    modifier = Modifier.padding(end = 6.dp),
-                ) { threads = n }
+            Column(Modifier.weight(1f)) {
+                Text("NEVER SETTLE", color = OpText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("Native Agentic AI \u00b7 OnePlus 7", color = OpTextSecondary, fontSize = 12.sp)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .background(
+                                when (headerState) {
+                                    EngineUiState.COMPLETED -> Color(0xFF2ECC71)
+                                    EngineUiState.ERROR -> OpRed
+                                    EngineUiState.OFFLINE -> OpTextSecondary
+                                    else -> OpRed
+                                },
+                                RoundedCornerShape(4.dp),
+                            ),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(headerState.label, color = OpText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+                Text("OP7", color = OpTextSecondary, fontSize = 11.sp)
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
+        Text(status, color = OpTextSecondary, fontSize = 12.sp)
+        Spacer(Modifier.height(12.dp))
 
-        Row(Modifier.fillMaxWidth()) {
-            PillButton("Load model", Modifier.weight(1f), enabled = !running) {
-                scope.launch {
-                    status = if (!modelFile.exists()) {
-                        "Model not found:\n${modelFile.absolutePath}\nCopy a GGUF there, then retry."
-                    } else {
+        // ---------------- PROMPT (primary interaction) ----------------
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = prompt,
+                onValueChange = { prompt = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("What do you want me to do?", color = OpTextSecondary) },
+                minLines = 2,
+                maxLines = 6,
+                trailingIcon = {
+                    if (prompt.isNotEmpty()) {
+                        Text(
+                            "\u00d7",
+                            color = OpTextSecondary,
+                            fontSize = 18.sp,
+                            modifier = Modifier
+                                .clickable { prompt = "" }
+                                .padding(8.dp),
+                        )
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = OpRed,
+                    unfocusedBorderColor = OpDivider,
+                    cursorColor = OpRed,
+                ),
+            )
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    scope.launch {
+                        if (prompt.isBlank()) return@launch
+                        if (!ensureLocalLoaded()) return@launch
+                        running = true
+                        output = ""
+                        engineState = EngineUiState.THINKING
+                        status = "generating\u2026"
                         try {
-                            if (loaded) engine.close() // re-init honors a new thread count
-                            engine.init(
-    EngineConfig(
-        modelFile.absolutePath,
-        threads = threads,
-        nativeLibDir = context.applicationInfo.nativeLibraryDir,
-    ),
-)
-                            loaded = true
-                            "Model loaded: ${modelFile.name} (threads=$threads)"
+                            val sb = StringBuilder()
+                            engine.generateStream(prompt, GenerationConfig(maxTokens = 64))
+                                .collect { sb.append(it); output = sb.toString() }
+                            status = "done (${sb.length} chars)"
+                            engineState = EngineUiState.COMPLETED
                         } catch (e: Exception) {
-                            "init failed: ${e.message}"
+                            status = "generate failed: ${e.message}"
+                            engineState = EngineUiState.ERROR
+                        } finally {
+                            running = false
                         }
+                    }
+                },
+                enabled = prompt.isNotBlank() && !running,
+                shape = RoundedCornerShape(24.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (running) OpCard else OpRed,
+                    contentColor = OpText,
+                ),
+                modifier = Modifier.size(48.dp),
+            ) {
+                Text("\u2191", fontSize = 20.sp)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        // ---------------- CPU THREADS ----------------
+        Text("CPU THREADS", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            listOf(2, 3, 4, 5, 6).forEach { n ->
+                SegmentedPill("$n", selected = threads == n, modifier = Modifier.padding(end = 8.dp)) {
+                    threads = n
+                }
+            }
+        }
+        Text("Recommended: 4 \u00b7 Snapdragon 855 (Kryo 485)", color = OpTextSecondary, fontSize = 10.sp)
+        Spacer(Modifier.height(12.dp))
+
+        // ---------------- PRIMARY ACTIONS ----------------
+        Row(Modifier.fillMaxWidth()) {
+            PillButton("Load Model", Modifier.weight(1f), enabled = !running) {
+                scope.launch {
+                    engineState = EngineUiState.LOADING
+                    status = "loading model\u2026"
+                    if (ensureLocalLoaded()) {
+                        engineState = EngineUiState.COMPLETED
                     }
                 }
             }
             Spacer(Modifier.width(8.dp))
-            PillButton("Generate", Modifier.weight(1f), enabled = !running) {
+            PillButton("Generate", Modifier.weight(1f), enabled = !running && prompt.isNotBlank()) {
                 scope.launch {
-                    if (!loaded) {
-                        status = "Load a model first."
-                        return@launch
-                    }
+                    if (!ensureLocalLoaded()) return@launch
+                    running = true
                     output = ""
-                    status = "generating…"
+                    engineState = EngineUiState.THINKING
+                    status = "generating\u2026"
                     try {
                         val sb = StringBuilder()
                         engine.generateStream(prompt, GenerationConfig(maxTokens = 64))
                             .collect { sb.append(it); output = sb.toString() }
                         status = "done (${sb.length} chars)"
+                        engineState = EngineUiState.COMPLETED
                     } catch (e: Exception) {
                         status = "generate failed: ${e.message}"
+                        engineState = EngineUiState.ERROR
+                    } finally {
+                        running = false
                     }
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
-
         Row(Modifier.fillMaxWidth()) {
+            PillButton(
+                if (running) "Agent \u00b7 RUNNING" else "Agent",
+                Modifier.weight(1f),
+                primary = true,
+                enabled = !running,
+            ) {
+                scope.launch {
+                    // One-tap usability: load the local model first when the
+                    // user picked local but hasn't loaded it yet.
+                    if (selectedModelId == "local-llama" && !ensureLocalLoaded()) return@launch
+                    runAgent(
+                        context = context,
+                        engine = engine,
+                        registry = registry,
+                        providerRegistry = providerRegistry,
+                        prefs = prefs,
+                        prompt = prompt,
+                        mode = routingModes[selectedMode],
+                        modeLabel = modes[selectedMode],
+                        preferredId = selectedModelId,
+                        loaded = loaded,
+                        setRunning = { running = it },
+                        setStatus = { status = it },
+                        setOutput = { output = it },
+                        setEngineState = { engineState = it },
+                        scope = scope,
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
             PillButton("Stats", Modifier.weight(1f), enabled = !running) {
                 scope.launch {
-                    if (!loaded) {
-                        status = "Load a model first."
-                        return@launch
-                    }
+                    if (!ensureLocalLoaded()) return@launch
                     try {
                         val s = engine.memoryStats()
                         status = "model=${s.modelBytes / (1024 * 1024)} MB | ctx=${s.nCtx} | " +
@@ -249,30 +388,10 @@ fun EngineScreen(
                     }
                 }
             }
-            Spacer(Modifier.width(8.dp))
-            PillButton("Agent", Modifier.weight(1f), primary = true, enabled = !running) {
-                runAgent(
-                    context = context,
-                    engine = engine,
-                    registry = registry,
-                    providerRegistry = providerRegistry,
-                    prefs = prefs,
-                    prompt = prompt,
-                    mode = routingModes[selectedMode],
-                    modeLabel = modes[selectedMode],
-                    preferredId = selectedModelId,
-                    loaded = loaded,
-                    setRunning = { running = it },
-                    setStatus = { status = it },
-                    setOutput = { output = it },
-                    scope = scope,
-                )
-            }
         }
-
         Spacer(Modifier.height(8.dp))
         PillButton(
-            if (serviceOn) "Stop service" else "Start service",
+            if (serviceOn) "STOP SERVICE" else "Start service",
             Modifier.fillMaxWidth(),
             primary = serviceOn,
             enabled = !running,
@@ -307,43 +426,30 @@ fun EngineScreen(
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Selected: ${selectedModelName(models, selectedModelId)}",
-                color = OpText,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f),
-            )
-            PillButton("Pick model", primary = true) { showPicker = true }
-        }
+        Text("SELECTED", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(6.dp))
+        models.filter { it.id == selectedModelId }.forEach { ModelCard(it, connText, connOk) }
         if (registry.lastRefreshMs > 0) {
             Text(
-                "Catalog updated: ${formatCatalogTime(registry.lastRefreshMs)} · ${models.size} models",
+                "Catalog updated: ${formatCatalogTime(registry.lastRefreshMs)} \u00b7 ${models.size} models",
                 color = OpTextSecondary,
                 fontSize = 10.sp,
             )
         }
-        Spacer(Modifier.height(6.dp))
-        models.filter { it.id == selectedModelId }.forEach { ModelCard(it) }
-        models.firstOrNull { it.id == selectedModelId && it.kind == ModelKind.REMOTE }?.let { d ->
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val keySet = providerRegistry.apiKey(d.provider).isNotBlank()
-                Text(
-                    "API key (${d.provider}): ${if (keySet) "set (memory only)" else "not set"}",
-                    color = if (keySet) OpText else OpRed,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f),
-                )
-                PillButton(if (keySet) "Change" else "Enter") {
-                    keyProviderId = d.provider
-                    keyInput = providerRegistry.apiKey(d.provider)
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth()) {
+            if (selected?.kind == ModelKind.REMOTE) {
+                PillButton("Configure", Modifier.weight(1f), enabled = !running) {
+                    keyProviderId = selected.provider
+                    keyInput = providerRegistry.apiKey(selected.provider)
                     showKeyDialog = true
                 }
+                Spacer(Modifier.width(8.dp))
+            }
+            PillButton("Pick Model", Modifier.weight(1f), primary = true, enabled = !running) {
+                showPicker = true
             }
         }
         Spacer(Modifier.height(4.dp))
@@ -414,19 +520,46 @@ fun EngineScreen(
                 .background(OpCard, RoundedCornerShape(12.dp)),
         ) {
             Column(Modifier.padding(12.dp)) {
-                SelectionContainer {
-                    Text(
-                        output.ifBlank { "Trace will appear here…" },
-                        color = OpText,
-                        fontSize = 13.sp,
-                        fontFamily = FontFamily.Monospace,
-                    )
+                if (output.isBlank()) {
+                    Text("Trace will appear here\u2026", color = OpTextSecondary, fontSize = 13.sp)
+                } else {
+                    SelectionContainer {
+                        Text(
+                            formatTrace(output),
+                            color = OpText,
+                            fontSize = 13.sp,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
                 }
             }
         }
         HorizonLight(active = running)
         Spacer(Modifier.height(24.dp))
     }
+}
+
+/** Renders the real agent event log with a structured step rail. */
+private fun formatTrace(raw: String): String =
+    raw.lineSequence().joinToString("\n") { line ->
+        when {
+            line.startsWith("[tool]") || line.startsWith("[obs]") || line.startsWith("[verify]") ->
+                "   $line"
+            line.startsWith("[") -> "\u25cf $line"
+            else -> line
+        }
+    }
+
+/** Engine console state shown in the header, driven by real operations. */
+private enum class EngineUiState(val label: String) {
+    READY("READY"),
+    LOADING("LOADING MODEL"),
+    THINKING("THINKING"),
+    TOOL("EXECUTING TOOL"),
+    VERIFYING("VERIFYING"),
+    COMPLETED("COMPLETED"),
+    ERROR("ERROR"),
+    OFFLINE("OFFLINE"),
 }
 
 private fun runAgent(
@@ -443,12 +576,9 @@ private fun runAgent(
     setRunning: (Boolean) -> Unit,
     setStatus: (String) -> Unit,
     setOutput: (String) -> Unit,
+    setEngineState: (EngineUiState) -> Unit,
     scope: kotlinx.coroutines.CoroutineScope,
 ) {
-    if (!loaded && preferredId == "local-llama") {
-        setStatus("Load the local model first (Load model), or pick a remote model.")
-        return
-    }
     // Privacy: Local Only forces offline routing regardless of the mode.
     val effectiveMode = if (prefs.privacyMode == PrivacyMode.LOCAL_ONLY) {
         RoutingMode.OFFLINE_ONLY
@@ -457,7 +587,8 @@ private fun runAgent(
     }
     setRunning(true)
     setOutput("")
-    setStatus("agent running…")
+    setStatus("agent running\u2026")
+    setEngineState(EngineUiState.THINKING)
     scope.launch {
         val memory = MemoryDatabase(context)
         val tools = ToolRegistry().apply {
@@ -494,6 +625,14 @@ private fun runAgent(
                     is AgentEvent.Stage -> {
                         sb.append("\n[${ev.state}]")
                         setOutput(sb.toString())
+                        setEngineState(
+                            when (ev.state) {
+                                AgentState.VERIFY -> EngineUiState.VERIFYING
+                                AgentState.EXECUTE, AgentState.OBSERVE -> EngineUiState.TOOL
+                                AgentState.FINALIZE, AgentState.STORE -> EngineUiState.THINKING
+                                else -> EngineUiState.THINKING
+                            },
+                        )
                     }
                     is AgentEvent.Routed -> {
                         val remote = ev.provider != "local"
@@ -509,6 +648,7 @@ private fun runAgent(
                     is AgentEvent.ToolCall -> {
                         sb.append("\n[tool] ${ev.tool}(${ev.input})")
                         setOutput(sb.toString())
+                        setEngineState(EngineUiState.TOOL)
                     }
                     is AgentEvent.Observation -> {
                         sb.append("\n[obs] ${ev.output.take(240)}")
@@ -518,18 +658,25 @@ private fun runAgent(
                         sb.append("\n[verify] ${ev.tool}: " +
                             if (ev.passed) "passed" else "failed")
                         setOutput(sb.toString())
+                        setEngineState(EngineUiState.VERIFYING)
                     }
                     is AgentEvent.Final -> {
                         done = true
                         sb.append("\n\nFINAL: ${ev.answer}")
                         setOutput(sb.toString())
+                        setEngineState(EngineUiState.COMPLETED)
                     }
-                    is AgentEvent.Error -> setStatus("agent error: ${ev.message}")
+                    is AgentEvent.Error -> {
+                        setStatus("agent error: ${ev.message}")
+                        setEngineState(EngineUiState.ERROR)
+                    }
                 }
             }
             setStatus(if (done) "agent done" else "agent ended without final answer")
+            if (!done) setEngineState(EngineUiState.READY)
         } catch (e: Exception) {
             setStatus("agent failed: ${e.message}")
+            setEngineState(EngineUiState.ERROR)
         } finally {
             if (sessionId != null) {
                 try {
@@ -589,11 +736,10 @@ private fun SegmentedPill(
 }
 
 private fun modeIndexFor(mode: RoutingMode): Int = when (mode) {
-    RoutingMode.HYBRID -> 0
-    RoutingMode.LOCAL_FIRST -> 0 // not exposed in the picker; Auto behaves closest
-    RoutingMode.FREE_FIRST -> 1
-    RoutingMode.FREE_ONLY -> 2
-    RoutingMode.OFFLINE_ONLY -> 3
+    RoutingMode.HYBRID -> 0      // AUTO
+    RoutingMode.FREE_FIRST, RoutingMode.FREE_ONLY -> 1 // FREE
+    RoutingMode.LOCAL_FIRST -> 2 // LOCAL
+    RoutingMode.OFFLINE_ONLY -> 3 // OFFLINE
 }
 
 private fun selectedModelName(models: List<ModelDescriptor>, id: String?): String =
@@ -621,7 +767,7 @@ private fun ensureRemoteProvider(
 }
 
 @Composable
-private fun ModelCard(d: ModelDescriptor) {
+private fun ModelCard(d: ModelDescriptor, connectionText: String, connectionOk: Boolean) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -637,7 +783,7 @@ private fun ModelCard(d: ModelDescriptor) {
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
-            ProviderPill(d.kind.name)
+            ProviderPill(if (d.kind == ModelKind.LOCAL) "LOCAL" else "REMOTE")
             when (d.costTier) {
                 ModelCostTier.FREE -> ProviderPill("FREE", red = true)
                 ModelCostTier.PAID -> ProviderPill("PAID")
@@ -646,12 +792,23 @@ private fun ModelCard(d: ModelDescriptor) {
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            "provider ${d.provider} · ctx ${d.contextLength ?: "UNKNOWN"} · tools ${yn(d.supportsTools)} · " +
+            "${d.provider} · ctx ${d.contextLength ?: "UNKNOWN"} · tools ${yn(d.supportsTools)} · " +
                 "vision ${yn(d.supportsVision)} · coding ${d.codingScore ?: "?"} · " +
-                "reasoning ${d.reasoningScore ?: "?"} · ${d.availability}",
+                "reasoning ${d.reasoningScore ?: "?"}",
             color = OpTextSecondary,
             fontSize = 11.sp,
         )
+        Spacer(Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (connectionOk) "\u25cf $connectionText" else "\u00d7 $connectionText",
+                color = if (connectionOk) Color(0xFF2ECC71) else OpRed,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(d.availability.name.replace('_', ' '), color = OpTextSecondary, fontSize = 10.sp)
+        }
     }
 }
 
