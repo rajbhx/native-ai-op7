@@ -1,14 +1,18 @@
 package com.engine.nativeai
 
 /**
- * Hard context budget (spec §15). Priority: system > current user request >
- * current tool results > relevant memory > older conversation. Never exceeds
- * maxTokens (4 chars/token heuristic; fine-tuned by profiling in phase 7).
+ * Hard context budget (spec §15 + math spec §2.C). Priority: system rules >
+ * current user request > active tool observations > relevant memory > older
+ * conversation. Compression starts at 85% of the model context window, never
+ * exceeds it, and never touches the system prompt.
  */
 class ContextManager(
-    val maxTokens: Int = 2048,
+    val maxTokens: Int = Op7SystemProfile.CONTEXT_LENGTH,
     private val charsPerToken: Int = 4,
+    private val compressThreshold: Float = Op7SystemProfile.CONTEXT_COMPRESS_THRESHOLD,
 ) {
+    private val budgetTokens: Int = (maxTokens * compressThreshold).toInt().coerceAtLeast(1)
+
     fun estimateTokens(text: String): Int =
         (text.length + charsPerToken - 1) / charsPerToken
 
@@ -32,14 +36,14 @@ class ContextManager(
         }
 
         var text = render()
-        while (estimateTokens(text) > maxTokens) {
+        while (estimateTokens(text) > budgetTokens) {
             when {
-                obs.isNotEmpty() -> obs.removeAt(0) // oldest first
+                obs.isNotEmpty() -> obs.removeAt(0) // oldest observation first
                 memoryCtx.isNotBlank() -> memoryCtx = ""
                 else -> {
                     // Still over budget with only system+user: hard-truncate
                     // the user section (never the system prompt).
-                    val budget = (maxTokens * charsPerToken).coerceAtLeast(system.length + 40)
+                    val budget = (budgetTokens * charsPerToken).coerceAtLeast(system.length + 40)
                     val userKeep = user.take((budget - system.length - 20).coerceAtLeast(20))
                     text = system + "\n\n" + userKeep
                     break

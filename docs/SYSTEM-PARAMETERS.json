@@ -1,0 +1,44 @@
+{
+  "target_device": "OnePlus 7",
+  "chipset": "Snapdragon 855",
+  "cpu_cores": {
+    "prime": 1,
+    "gold": 3,
+    "silver": 4,
+    "pinned_affinity_mask": "0xF0"
+  },
+  "memory_limits_mb": {
+    "max_total_runtime": 1536,
+    "model_weights_max": 1050,
+    "kv_cache_max": 224,
+    "ggml_scratch_max": 64,
+    "sqlite_fts5_max": 16
+  },
+  "inference_config": {
+    "context_length": 2048,
+    "batch_size": 512,
+    "quant_type_kv": "Q8_0",
+    "threads": 4,
+    "use_mmap": true
+  },
+  "memory_retrieval": {
+    "decay_lambda": 0.05,
+    "half_life_days": 13.8
+  },
+  "context_compression": {
+    "threshold": 0.85,
+    "priority": [
+      "system_rules",
+      "current_user_request",
+      "active_tool_observations",
+      "retrieved_memories_and_skills",
+      "past_conversation_history"
+    ]
+  },
+  "design_system": {
+    "theme": "OnePlus OxygenOS Dark",
+    "primary_color": "#EB0029",
+    "background_color": "#121212",
+    "surface_color": "#1E1E1E"
+  }
+}

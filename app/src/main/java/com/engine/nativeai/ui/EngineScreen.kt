@@ -283,9 +283,12 @@ private fun runAgent(
                         sb.append(ev.text)
                         setOutput(sb.toString())
                     }
+                    is AgentEvent.Stage -> {
+                        sb.append("\n[${ev.state}]")
+                        setOutput(sb.toString())
+                    }
                     is AgentEvent.Routed -> {
-                        sb.append("\n\n[model] ${ev.modelId} | ${ev.provider} | " +
-                            "${ev.costTier} | ${ev.taskType}\n")
+                        sb.append(" [${ev.modelId} | ${ev.provider} | ${ev.costTier} | ${ev.taskType}]\n")
                         setOutput(sb.toString())
                     }
                     is AgentEvent.ToolCall -> {

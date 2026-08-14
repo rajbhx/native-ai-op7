@@ -280,11 +280,14 @@ class MemoryDatabase(context: Context) :
     fun searchSimilarExperiences(query: String, topK: Int = DEFAULT_TOP_K): List<Experience> {
         if (query.isBlank()) return emptyList()
         val now = System.currentTimeMillis()
+        // Spec §2.B: score = BM25 relevance * exp(-lambda * ageDays),
+        // lambda = 0.05 -> half-life ~13.8 days. Utility/success are small tiebreaks.
         return ftsCandidates(query, limit = 20)
-            .map { e ->
+            .map { (rank, e) ->
                 val ageDays = (now - e.timestamp).toDouble() / DAY_MS
-                val recency = 1.0 - minOf(ageDays, RECENCY_WINDOW_DAYS) / RECENCY_WINDOW_DAYS
-                val score = e.utility * 0.5 + recency * 0.3 + (if (e.success) 0.2 else 0.0)
+                val decay = Math.exp(-Op7SystemProfile.DECAY_LAMBDA * ageDays)
+                val relevance = -rank // bm25() returns negative, lower = better
+                val score = relevance * decay + e.utility * 0.1 + (if (e.success) 0.05 else 0.0)
                 e to score
             }
             .sortedByDescending { it.second }
@@ -342,7 +345,7 @@ class MemoryDatabase(context: Context) :
         val now = System.currentTimeMillis()
         writableDatabase.execSQL(
             """UPDATE memory_scores
-               SET utility = utility * exp(-0.02 * ((? - last_used) / 86400000.0))
+               SET utility = utility * exp(-0.05 * ((? - last_used) / 86400000.0))
                WHERE last_used > 0 AND (? - last_used) > 0""",
             arrayOf<Any>(now, now),
         )
@@ -389,13 +392,16 @@ class MemoryDatabase(context: Context) :
 
     // ------------------------------------------------------------------
 
-    private fun ftsCandidates(query: String, limit: Int): List<Experience> {
+    private data class FtsCandidate(val rank: Float, val experience: Experience)
+
+    private fun ftsCandidates(query: String, limit: Int): List<FtsCandidate> {
         val match = query.split(Regex("\\s+"))
             .filter { it.isNotBlank() }
             .joinToString(" OR ") { "\"" + it.replace("\"", "").replace("*", "") + "\"" }
         if (match.isBlank()) return emptyList()
         val cursor = readableDatabase.rawQuery(
-            """SELECT e.id, e.problem_summary, e.approach_summary, e.tool_used,
+            """SELECT bm25(experiences_fts) AS bm25_rank,
+                      e.id, e.problem_summary, e.approach_summary, e.tool_used,
                       e.result_summary, e.success, e.confidence, e.utility_score, e.timestamp
                FROM experiences_fts
                JOIN experiences e ON e.id = experiences_fts.rowid
@@ -403,7 +409,18 @@ class MemoryDatabase(context: Context) :
                ORDER BY bm25(experiences_fts) LIMIT ?""",
             arrayOf(match, limit.toString()),
         )
-        return cursor.use { c -> buildList { while (c.moveToNext()) add(c.toExperience()) } }
+        return cursor.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        FtsCandidate(
+                            rank = c.getFloat(c.getColumnIndexOrThrow("bm25_rank")),
+                            experience = c.toExperience(),
+                        ),
+                    )
+                }
+            }
+        }
     }
 
     private fun syncExperienceUtility() {

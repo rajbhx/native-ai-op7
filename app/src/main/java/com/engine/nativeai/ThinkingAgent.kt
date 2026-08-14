@@ -7,8 +7,10 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 
 /**
- * ReAct-style orchestrator (spec §11): memory retrieval -> model -> tool
- * selection (JSON) -> execution -> observation -> loop -> final answer.
+ * ReAct-style orchestrator following the formal state machine (math spec §3):
+ * IDLE -> UNDERSTAND -> PLAN -> EXECUTE -> OBSERVE -> VERIFY
+ *   -> (valid) FINALIZE -> STORE
+ *   -> (invalid) REPLAN -> PLAN
  *
  * The kernel depends only on ModelRouter/ModelRegistry — never on a specific
  * provider (spec §1). Fallback chain per step: primary -> next candidate
@@ -29,13 +31,19 @@ class ThinkingAgent(
         userPrompt: String,
         config: GenerationConfig = GenerationConfig(maxTokens = 256),
     ): Flow<AgentEvent> = flow {
-        var state = AgentState.THINKING
+        var state = AgentState.IDLE
+        var replan = false
         val observations = mutableListOf<String>()
         val executor = ToolExecutor(tools, memory)
         val taskType = TaskClassifier.classify(userPrompt, networkAvailable)
 
         repeat(maxIterations) {
             if (state == AgentState.CANCELLED) return@flow
+
+            if (!replan) {
+                state = AgentState.UNDERSTAND
+                emit(AgentEvent.Stage(state))
+            }
 
             val task = AgentTask(
                 prompt = userPrompt,
@@ -59,7 +67,9 @@ class ThinkingAgent(
                 if (descriptor.kind == ModelKind.REMOTE) MemoryPrivacyFilter.forRemote(it) else it
             }
 
-            state = AgentState.THINKING
+            state = AgentState.PLAN
+            emit(AgentEvent.Stage(state))
+
             val sb = StringBuilder()
             var provider = registry.providerFor(descriptor) ?: run {
                 emit(AgentEvent.Error("provider for ${descriptor.id} not registered"))
@@ -122,8 +132,12 @@ class ThinkingAgent(
 
             val action = ActionParser.parse(sb.toString())
             if (action == null) {
-                state = AgentState.FINAL
+                // No structured action: treat the generated text as the answer.
+                state = AgentState.FINALIZE
+                emit(AgentEvent.Stage(state))
                 val answer = sb.toString().trim()
+                state = AgentState.STORE
+                emit(AgentEvent.Stage(state))
                 withContext(Dispatchers.IO) {
                     memory.storeExperience(
                         userPrompt, "no tool", "final_answer", answer.take(500),
@@ -134,17 +148,26 @@ class ThinkingAgent(
                 return@flow
             }
 
+            state = AgentState.EXECUTE
+            emit(AgentEvent.Stage(state))
             emit(AgentEvent.ToolCall(action.name, action.input))
-            state = AgentState.TOOL_CALL
             val result = executor.execute(action.name, action.input)
             observations.add("${action.name}: ${result.output.take(400)}")
-            state = AgentState.OBSERVING
+
+            state = AgentState.OBSERVE
+            emit(AgentEvent.Stage(state))
             emit(AgentEvent.Observation(action.name, result.output))
+
+            state = AgentState.VERIFY
+            emit(AgentEvent.Stage(state))
             val verification = Verifier.verifyTool(result.output, result.ok, action.name)
             emit(AgentEvent.Verification(action.name, verification.passed))
 
             if (action.name == "final_answer") {
-                state = AgentState.FINAL
+                state = AgentState.FINALIZE
+                emit(AgentEvent.Stage(state))
+                state = AgentState.STORE
+                emit(AgentEvent.Stage(state))
                 withContext(Dispatchers.IO) {
                     memory.storeExperience(
                         userPrompt, "agent", "final_answer",
@@ -153,6 +176,14 @@ class ThinkingAgent(
                 }
                 emit(AgentEvent.Final(result.output))
                 return@flow
+            }
+
+            if (!verification.passed) {
+                state = AgentState.REPLAN
+                replan = true
+                emit(AgentEvent.Stage(state))
+            } else {
+                replan = false
             }
         }
         emit(AgentEvent.Error("max iterations ($maxIterations) reached without a final answer"))
