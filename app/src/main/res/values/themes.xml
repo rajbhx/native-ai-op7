@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.NativeAI" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/op_bg</item>
+        <item name="android:colorAccent">@color/op_red</item>
+        <item name="android:statusBarColor">@color/op_bg</item>
+        <item name="android:navigationBarColor">@color/op_bg</item>
+        <item name="android:textColorPrimary">@color/op_text</item>
+        <item name="android:textColorSecondary">@color/op_text_secondary</item>
+    </style>
+</resources>

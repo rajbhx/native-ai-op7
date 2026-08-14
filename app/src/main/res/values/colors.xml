@@ -1,3 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#0D1117</color>
+
+    <!-- OxygenOS "NEVER SETTLE" design tokens -->
+    <color name="op_red">#EB0029</color>
+    <color name="op_red_dark">#8F0019</color>
+    <color name="op_bg">#121212</color>
+    <color name="op_card">#1E1E1E</color>
+    <color name="op_text">#FFFFFF</color>
+    <color name="op_text_secondary">#A0A0A0</color>
+    <color name="op_divider">#2A2A2A</color>
+    <color name="op_blue">#008BFF</color>
+    <color name="op_glow">#EB0029</color>
+    <color name="op_tag_free">#EB0029</color>
 </resources>

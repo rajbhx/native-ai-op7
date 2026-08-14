@@ -1,76 +1,201 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp">
-
-    <TextView
-        android:id="@+id/status_view"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="12sp"
-        android:textIsSelectable="true" />
-
-    <EditText
-        android:id="@+id/prompt_input"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="Prompt"
-        android:inputType="textMultiLine"
-        android:minLines="2" />
+    android:background="@color/op_bg"
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/load_btn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Load model" />
-
-        <Button
-            android:id="@+id/generate_btn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Generate" />
-
-        <Button
-            android:id="@+id/stats_btn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Stats" />
-
-        <Button
-            android:id="@+id/agent_btn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Agent" />
-    </LinearLayout>
-
-    <Spinner
-        android:id="@+id/mode_spinner"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:contentDescription="Routing mode" />
-
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
+        android:orientation="vertical"
+        android:padding="16dp">
 
         <TextView
-            android:id="@+id/output_view"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="NEVER SETTLE"
+            android:textColor="@color/op_text"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:fontFamily="sans-serif-medium" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="Native Agentic AI Engine · OnePlus 7"
+            android:textColor="@color/op_text_secondary"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/status_view"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="14sp"
+            android:layout_marginTop="10dp"
+            android:textColor="@color/op_text_secondary"
+            android:textSize="12sp"
             android:textIsSelectable="true" />
-    </ScrollView>
-</LinearLayout>
+
+        <EditText
+            android:id="@+id/prompt_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_input"
+            android:padding="12dp"
+            android:hint="Prompt / task"
+            android:textColor="@color/op_text"
+            android:textColorHint="@color/op_text_secondary"
+            android:inputType="textMultiLine"
+            android:minLines="2" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/load_btn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/bg_pill_dark"
+                android:textColor="@color/op_text"
+                android:text="Load model" />
+
+            <Button
+                android:id="@+id/generate_btn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/bg_pill_dark"
+                android:textColor="@color/op_text"
+                android:text="Generate" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/stats_btn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/bg_pill_dark"
+                android:textColor="@color/op_text"
+                android:text="Stats" />
+
+            <Button
+                android:id="@+id/agent_btn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/bg_pill_red"
+                android:textColor="@color/op_text"
+                android:text="Agent" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="MODEL HUB"
+            android:textColor="@color/op_text"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.08" />
+
+        <LinearLayout
+            android:id="@+id/mode_segment"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_segment"
+            android:orientation="horizontal"
+            android:padding="4dp">
+
+            <Button
+                android:id="@+id/mode_auto_btn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/bg_pill_red"
+                android:textColor="@color/op_text"
+                android:text="Auto" />
+
+            <Button
+                android:id="@+id/mode_free_btn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/bg_pill_outline"
+                android:textColor="@color/op_text_secondary"
+                android:text="Free-First" />
+
+            <Button
+                android:id="@+id/mode_offline_btn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/bg_pill_outline"
+                android:textColor="@color/op_text_secondary"
+                android:text="Offline" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/model_hub_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="AGENT TRACE"
+            android:textColor="@color/op_text"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.08" />
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp">
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="240dp"
+                android:background="@drawable/bg_card"
+                android:padding="12dp">
+
+                <TextView
+                    android:id="@+id/output_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/op_text"
+                    android:textSize="13sp"
+                    android:fontFamily="monospace"
+                    android:textIsSelectable="true" />
+            </ScrollView>
+
+            <View
+                android:id="@+id/horizon_light"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_gravity="bottom"
+                android:background="@drawable/bg_horizon"
+                android:visibility="gone" />
+        </FrameLayout>
+    </LinearLayout>
+</ScrollView>
