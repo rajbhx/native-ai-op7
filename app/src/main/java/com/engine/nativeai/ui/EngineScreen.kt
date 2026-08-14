@@ -514,6 +514,7 @@ private fun SegmentedPill(
 
 private fun modeIndexFor(mode: RoutingMode): Int = when (mode) {
     RoutingMode.HYBRID -> 0
+    RoutingMode.LOCAL_FIRST -> 0 // not exposed in the picker; Auto behaves closest
     RoutingMode.FREE_FIRST -> 1
     RoutingMode.FREE_ONLY -> 2
     RoutingMode.OFFLINE_ONLY -> 3

@@ -82,7 +82,7 @@ class ModelRouter(
             }
 
             RoutingMode.HYBRID -> {
-                val localMaxCtx = local.maxOfOrNull { it.contextLength } ?: 0
+                val localMaxCtx = local.maxOfOrNull { it.contextLength ?: 0 } ?: 0
                 val localCapable = localMaxCtx >= task.contextLength &&
                     task.requiredCapabilities.none { it == ModelCapability.VISION }
                 val simpleEnough = task.taskType in simpleTasks ||

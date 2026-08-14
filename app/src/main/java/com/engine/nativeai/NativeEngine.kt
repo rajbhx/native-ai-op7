@@ -131,6 +131,7 @@ class NativeEngine : AutoCloseable {
         gpuLayers: Int,
         nCtx: Int,
         pinHighCores: Boolean,
+        nativeLibDir: String,
     ): Boolean
     private external fun nativeGenerate(prompt: String, maxTokens: Int): String
     private external fun nativeGenerateStream(
