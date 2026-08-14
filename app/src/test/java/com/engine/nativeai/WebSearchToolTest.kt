@@ -1,5 +1,6 @@
 package com.engine.nativeai
 
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -7,14 +8,14 @@ import org.junit.Test
 
 class WebSearchToolTest {
     @Test
-    fun localFallbackIsExplicitlyUnavailable() {
+    fun localFallbackIsExplicitlyUnavailable() = runBlocking {
         val out = WebSearchTool(LocalFallbackProvider()).execute("test query")
         assertFalse(out.ok)
         assertTrue(out.text.contains("unavailable"))
     }
 
     @Test
-    fun providerHitMarksToolOk() {
+    fun providerHitMarksToolOk() = runBlocking {
         val provider = object : SearchProvider {
             override suspend fun search(query: String) = SearchResult("result for $query", ok = true)
         }
@@ -24,7 +25,7 @@ class WebSearchToolTest {
     }
 
     @Test
-    fun blankProviderTextIsNotOkEvenIfFlagged() {
+    fun blankProviderTextIsNotOkEvenIfFlagged() = runBlocking {
         val provider = object : SearchProvider {
             override suspend fun search(query: String) = SearchResult("   ", ok = true)
         }
