@@ -1,7 +1,7 @@
 package com.engine.nativeai
 
-import android.app.Activity
 import android.os.Bundle
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import com.engine.nativeai.ui.EngineScreen
 import com.engine.nativeai.ui.OxygenOSTheme
@@ -12,7 +12,7 @@ import java.io.File
  * Trace. All engine logic stays in NativeEngine / ModelRegistry / agent —
  * this activity only wires them into the UI.
  */
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     private val engine = NativeEngine()
 
     override fun onCreate(savedInstanceState: Bundle?) {
