@@ -15,12 +15,12 @@ class ToolExecutor(
     private val maxOutputLength: Int = 2000,
     private val timeoutMs: Long = 15_000,
 ) {
-    suspend fun execute(name: String, input: String): ToolResult {
+    suspend fun execute(name: String, input: String): ToolOutput {
         val tool = registry[name]
-            ?: return ToolResult(name, "", false, "unknown tool: $name")
+            ?: return ToolOutput(name, "", false, "unknown tool: $name")
         if (input.length > maxInputLength) {
             logTool(name, input, "input too long", false)
-            return ToolResult(name, "", false, "input too long (${input.length} chars)")
+            return ToolOutput(name, "", false, "input too long (${input.length} chars)")
         }
         val started = System.currentTimeMillis()
         return try {
@@ -30,17 +30,17 @@ class ToolExecutor(
             result.copy(output = output, durationMs = System.currentTimeMillis() - started)
         } catch (e: TimeoutCancellationException) {
             logTool(name, input, "timeout", false)
-            ToolResult(name, "", false, "tool timeout after ${timeoutMs}ms", durationMs = timeoutMs)
+            ToolOutput(name, "", false, "tool timeout after ${timeoutMs}ms", durationMs = timeoutMs)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
             logTool(name, input, e.message ?: "tool error", false)
-            ToolResult(name, "", false, e.message ?: "tool error",
+            ToolOutput(name, "", false, e.message ?: "tool error",
                 durationMs = System.currentTimeMillis() - started)
         }
     }
 
     private fun logTool(name: String, input: String, output: String, ok: Boolean) {
-        memory?.storeToolResult(name, input.hashCode().toString(), output.take(500), ok)
+        memory?.storeToolOutput(name, input.hashCode().toString(), output.take(500), ok)
     }
 }

@@ -5,11 +5,11 @@ class CalculatorTool : AgentTool {
     override val description =
         "Evaluate a safe arithmetic expression (+, -, *, /, ^, parentheses, decimals). Example: (2 + 3) * 4"
 
-    override suspend fun execute(input: String): ToolResult = try {
+    override suspend fun execute(input: String): ToolOutput = try {
         val value = SafeExpr.evaluate(input)
-        ToolResult(name, format(value), true)
+        ToolOutput(name, format(value), true)
     } catch (e: Exception) {
-        ToolResult(name, "", false, e.message ?: "invalid expression")
+        ToolOutput(name, "", false, e.message ?: "invalid expression")
     }
 
     private fun format(v: Double): String =

@@ -10,10 +10,10 @@ class FileSearchTool(private val rootDir: File, private val maxDepth: Int = 3) :
     override val description =
         "Find a file by name inside the app's private storage. Input: a filename or fragment."
 
-    override suspend fun execute(input: String): ToolResult = withContext(Dispatchers.IO) {
+    override suspend fun execute(input: String): ToolOutput = withContext(Dispatchers.IO) {
         val query = input.trim().lowercase()
         if (query.isEmpty()) {
-            return@withContext ToolResult(name, "", false, "empty query")
+            return@withContext ToolOutput(name, "", false, "empty query")
         }
         val hits = mutableListOf<File>()
         fun walk(dir: File, depth: Int) {
@@ -25,9 +25,9 @@ class FileSearchTool(private val rootDir: File, private val maxDepth: Int = 3) :
         }
         walk(rootDir, 0)
         if (hits.isEmpty()) {
-            ToolResult(name, "no files match '$query' under ${rootDir.absolutePath}", false, null)
+            ToolOutput(name, "no files match '$query' under ${rootDir.absolutePath}", false, null)
         } else {
-            ToolResult(
+            ToolOutput(
                 name,
                 hits.joinToString("\n") { "${it.absolutePath} (${it.length()} bytes)" },
                 true,

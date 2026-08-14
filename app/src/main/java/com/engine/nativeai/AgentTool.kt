@@ -1,6 +1,7 @@
 package com.engine.nativeai
 
-data class ToolResult(
+/** Result of one bounded tool execution (spec §12). */
+data class ToolOutput(
     val toolName: String,
     val output: String,
     val ok: Boolean,
@@ -12,5 +13,5 @@ data class ToolResult(
 interface AgentTool {
     val name: String
     val description: String
-    suspend fun execute(input: String): ToolResult
+    suspend fun execute(input: String): ToolOutput
 }

@@ -6,7 +6,7 @@ package com.engine.nativeai
  * maxTokens (4 chars/token heuristic; fine-tuned by profiling in phase 7).
  */
 class ContextManager(
-    private val maxTokens: Int = 2048,
+    val maxTokens: Int = 2048,
     private val charsPerToken: Int = 4,
 ) {
     fun estimateTokens(text: String): Int =

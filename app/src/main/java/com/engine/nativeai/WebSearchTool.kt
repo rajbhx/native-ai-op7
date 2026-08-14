@@ -19,8 +19,8 @@ class WebSearchTool(private val provider: SearchProvider) : AgentTool {
     override val description =
         "Search the web for up-to-date information. Input: a query string."
 
-    override suspend fun execute(input: String): ToolResult {
+    override suspend fun execute(input: String): ToolOutput {
         val result = provider.search(input)
-        return ToolResult(name, result, result.isNotBlank() && !result.startsWith("web search unavailable"))
+        return ToolOutput(name, result, result.isNotBlank() && !result.startsWith("web search unavailable"))
     }
 }

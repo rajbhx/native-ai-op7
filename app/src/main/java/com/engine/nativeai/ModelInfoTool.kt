@@ -6,15 +6,15 @@ class ModelInfoTool(private val registry: ModelRegistry) : AgentTool {
     override val description =
         "List available models, providers, cost tiers and capabilities. Input: ignored."
 
-    override suspend fun execute(input: String): ToolResult {
+    override suspend fun execute(input: String): ToolOutput {
         val lines = registry.list().map { d ->
             "${d.id} | ${d.provider} | ${d.kind} | ${d.costTier} | ctx=${d.contextLength} | " +
                 "tools=${d.supportsTools} | reasoning=${d.supportsReasoning} | ${d.availability}"
         }
         return if (lines.isEmpty()) {
-            ToolResult(name, "no models registered", false, null)
+            ToolOutput(name, "no models registered", false, null)
         } else {
-            ToolResult(name, lines.joinToString("\n"), true)
+            ToolOutput(name, lines.joinToString("\n"), true)
         }
     }
 }

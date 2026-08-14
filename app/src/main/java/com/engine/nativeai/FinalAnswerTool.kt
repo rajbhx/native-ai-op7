@@ -5,6 +5,6 @@ class FinalAnswerTool : AgentTool {
     override val description =
         "Finish the task with the final answer. Input: the final answer text."
 
-    override suspend fun execute(input: String): ToolResult =
-        ToolResult(name, input.trim(), true)
+    override suspend fun execute(input: String): ToolOutput =
+        ToolOutput(name, input.trim(), true)
 }

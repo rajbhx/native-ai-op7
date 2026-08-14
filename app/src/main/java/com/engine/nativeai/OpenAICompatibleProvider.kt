@@ -176,16 +176,19 @@ class OpenAICompatibleProvider(
     private fun parseSseEvent(data: String): SseEvent? = try {
         val json = JSONObject(data)
         val choices = json.optJSONArray("choices")
-        if (choices == null || choices.length() == 0) return null
-        val choice = choices.getJSONObject(0)
-        if (choice.optString("finish_reason") == "error") {
-            SseError(json.optString("error", "provider error"))
+        if (choices == null || choices.length() == 0) {
+            null
         } else {
-            val delta = choice.optJSONObject("delta") ?: JSONObject()
-            SseContent(
-                delta = delta.optString("content", ""),
-                reasoning = delta.optString("reasoning_content", ""),
-            )
+            val choice = choices.getJSONObject(0)
+            if (choice.optString("finish_reason") == "error") {
+                SseError(json.optString("error", "provider error"))
+            } else {
+                val delta = choice.optJSONObject("delta") ?: JSONObject()
+                SseContent(
+                    delta = delta.optString("content", ""),
+                    reasoning = delta.optString("reasoning_content", ""),
+                )
+            }
         }
     } catch (e: Exception) {
         null

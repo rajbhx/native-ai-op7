@@ -47,8 +47,7 @@ class ThinkingAgent(
                 preferLocal = preferLocal,
             )
 
-            var descriptor = router.route(task, registry)
-            if (descriptor == null) {
+            var descriptor = router.route(task, registry) ?: run {
                 emit(AgentEvent.Error("no model available (mode=${router.mode}, network=$networkAvailable)"))
                 return@flow
             }
@@ -62,8 +61,7 @@ class ThinkingAgent(
 
             state = AgentState.THINKING
             val sb = StringBuilder()
-            var provider = registry.providerFor(descriptor)
-            if (provider == null) {
+            var provider = registry.providerFor(descriptor) ?: run {
                 emit(AgentEvent.Error("provider for ${descriptor.id} not registered"))
                 return@flow
             }
