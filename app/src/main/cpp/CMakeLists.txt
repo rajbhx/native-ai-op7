@@ -31,7 +31,7 @@ add_library(native-lib SHARED
     NativeEngine.cpp
     MemoryMonitor.cpp
     hardware_detector.cpp)
-target_link_libraries(native-lib PRIVATE llama)
+target_link_libraries(native-lib PRIVATE llama log)
 target_include_directories(native-lib PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp/include
     ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp/ggml/include)

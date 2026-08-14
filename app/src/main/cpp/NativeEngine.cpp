@@ -1,7 +1,9 @@
 #include "NativeEngine.hpp"
 
+#include <android/log.h>
 #include <cstdio>
 #include <cstring>
+#include <unistd.h>
 
 #include "hardware_detector.hpp"
 #include "MemoryMonitor.hpp"
@@ -77,23 +79,24 @@ bool NativeEngine::init(const Config& config) {
     }
     config_.threads = cparams.n_threads;
 
+    // Blueprint Phase 2: pin this thread (the one that drives llama_decode)
+    // to the high Gold/Prime cores BEFORE first graph compute, so the worker
+    // threads llama spawns inherit the same affinity. Honest + measurable;
+    // affinity is never applied blindly (ADR-009).
     if (config_.pin_high_cores) {
         const std::vector<int> cores = hw::highCores();
         if (!cores.empty() && static_cast<int>(cores.size()) >= config_.threads) {
-            ggml_threadpool_params tp = ggml_threadpool_params_default(config_.threads);
-            std::memset(tp.cpumask, 0, sizeof(tp.cpumask));
-            for (int c : cores) {
-                if (c >= 0 && c < GGML_MAX_N_THREADS) {
-                    tp.cpumask[c] = true;
-                }
-            }
-            tp.strict_cpu = true;
-            tp_ = ggml_threadpool_new(&tp);
-            if (tp_ != nullptr) {
-                llama_attach_threadpool(ctx_, tp_, tp_);
-            }
+            const bool pinned = hw::pinCurrentThread(cores);
+            __android_log_print(
+                ANDROID_LOG_INFO, "NativeEngineJNI",
+                pinned ? "Successfully pinned execution thread %ld to Kryo 485 Gold/Prime cores (%d cores)"
+                       : "Thread pinning unavailable on this device (falling back to default affinity)",
+                static_cast<long>(gettid()), static_cast<int>(cores.size()));
         }
     }
+    __android_log_print(ANDROID_LOG_INFO, "NativeEngineJNI",
+                        "Native Engine Initialized Successfully (n_ctx=%d, n_threads=%d)",
+                        llama_n_ctx(ctx_), static_cast<int>(config_.threads));
     return true;
 }
 
@@ -225,13 +228,6 @@ uint64_t NativeEngine::rssBytes() const {
 
 void NativeEngine::unload() {
     cancel_.store(true);
-    if (tp_ != nullptr) {
-        if (ctx_ != nullptr) {
-            llama_detach_threadpool(ctx_);
-        }
-        ggml_threadpool_free(tp_);
-        tp_ = nullptr;
-    }
     if (ctx_ != nullptr) {
         llama_free(ctx_);
         ctx_ = nullptr;
