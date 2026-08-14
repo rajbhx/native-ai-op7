@@ -45,6 +45,13 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="Stats" />
+
+        <Button
+            android:id="@+id/agent_btn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Agent" />
     </LinearLayout>
 
     <ScrollView

@@ -31,6 +31,7 @@ class MainActivity : Activity() {
         val loadBtn = findViewById<Button>(R.id.load_btn)
         val genBtn = findViewById<Button>(R.id.generate_btn)
         val statsBtn = findViewById<Button>(R.id.stats_btn)
+        val agentBtn = findViewById<Button>(R.id.agent_btn)
         val modelFile = File(filesDir, "models/model.gguf")
 
         status.text = "Engine library loaded. Put a GGUF at:\n${modelFile.absolutePath}"
@@ -73,6 +74,59 @@ class MainActivity : Activity() {
                     status.text = "generate failed: ${e.message}"
                 }
                 genBtn.isEnabled = true
+            }
+        }
+
+        agentBtn.setOnClickListener {
+            scope.launch {
+                if (!loaded) {
+                    status.text = "Load a model first."
+                    return@launch
+                }
+                agentBtn.isEnabled = false
+                output.text = ""
+                status.text = "agent running…"
+                val memory = MemoryDatabase(this@MainActivity)
+                val tools = ToolRegistry().apply {
+                    register(MemorySearchTool(memory))
+                    register(CalculatorTool())
+                    register(SystemInfoTool(engine, memory))
+                    register(WebSearchTool(LocalFallbackProvider()))
+                    register(FileSearchTool(filesDir))
+                    register(FinalAnswerTool())
+                }
+                val agent = ThinkingAgent(engine, memory, tools)
+                try {
+                    val sb = StringBuilder()
+                    var done = false
+                    agent.run(prompt.text.toString(), GenerationConfig(maxTokens = 256))
+                        .collect { ev ->
+                            when (ev) {
+                                is AgentEvent.Token -> {
+                                    sb.append(ev.text)
+                                    output.text = sb.toString()
+                                }
+                                is AgentEvent.ToolCall -> {
+                                    sb.append("\n\n[tool] ${ev.tool}(${ev.input})")
+                                    output.text = sb.toString()
+                                }
+                                is AgentEvent.Observation -> {
+                                    sb.append("\n[obs] ${ev.output.take(240)}")
+                                    output.text = sb.toString()
+                                }
+                                is AgentEvent.Final -> {
+                                    done = true
+                                    sb.append("\n\nFINAL: ${ev.answer}")
+                                    output.text = sb.toString()
+                                }
+                                is AgentEvent.Error -> status.text = "agent error: ${ev.message}"
+                            }
+                        }
+                    status.text = if (done) "agent done" else "agent ended without final answer"
+                } catch (e: Exception) {
+                    status.text = "agent failed: ${e.message}"
+                }
+                agentBtn.isEnabled = true
             }
         }
 
