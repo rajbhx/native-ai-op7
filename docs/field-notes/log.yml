@@ -89,3 +89,8 @@ sections:
         cause: "Android 14 introduced FOREGROUND_SERVICE_SPECIAL_USE with a required PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
         solution: "declare FOREGROUND_SERVICE + FOREGROUND_SERVICE_SPECIAL_USE + POST_NOTIFICATIONS; service foregroundServiceType=specialUse + property; request POST_NOTIFICATIONS at runtime (API 33+)"
         tags: [android, foreground-service, manifest]
+      - id: A18
+        problem: "setup-java v4 deprecation annotation; web_search ok flag coupled to a magic string"
+        cause: "actions/setup-java@v4 is deprecated; WebSearchTool checked result.startsWith('web search unavailable')"
+        solution: "migrate to actions/setup-java@v5; SearchProvider returns SearchResult(text, ok), LocalFallbackProvider ok=false; playbook phase 5 marked done"
+        tags: [github-actions, agent, playbook, kotlin]
