@@ -34,3 +34,18 @@ sections:
         cause: "KV-cache API refactor — memory ops take a llama_memory_t handle, not the context"
         solution: "llama_memory_clear(llama_get_memory(g_ctx), false) with null guard"
         tags: [llama.cpp, api, kv-cache]
+      - id: A7
+        problem: "lifecycleScope unresolved in MainActivity (receiver mismatch)"
+        cause: "lifecycleScope is a LifecycleOwner extension; plain Activity is not a LifecycleOwner"
+        solution: "own CoroutineScope(SupervisorJob() + Dispatchers.Main), cancel in onDestroy, drop lifecycle-runtime-ktx"
+        tags: [kotlin, android, lifecycle]
+      - id: A8
+        problem: "llama_load_model_from_file / llama_free_model deprecated at b10428"
+        cause: "llama.cpp renamed the model API (llama_model_load_from_file / llama_model_free)"
+        solution: "use the current names, verified against the pinned header"
+        tags: [llama.cpp, api]
+      - id: A9
+        problem: "sampler chain params at b10428 carry only no_perf — penalties missing"
+        cause: "llama_sampler_chain_params has just no_perf; penalties are a separate sampler object"
+        solution: "add llama_sampler_init_penalties(n_vocab, last_n, repeat, 0, 0) to the chain before top_k/top_p/temp/dist"
+        tags: [llama.cpp, sampling]
