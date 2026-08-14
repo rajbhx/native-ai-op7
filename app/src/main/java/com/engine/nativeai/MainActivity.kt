@@ -18,19 +18,29 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val modelFile = File(filesDir, "models/model.gguf")
+        val providerRegistry = ProviderRegistry()
+        val prefs = ModelPreferences(this)
+        providerRegistry.setBaseUrl(ModelCatalog.ZEN_PROVIDER, prefs.zenBaseUrl)
         val registry = ModelRegistry(File(filesDir, "models/catalog.json")).apply {
             register(
-    LocalModelProvider(
-        engine,
-        EngineConfig(modelFile.absolutePath, nativeLibDir = applicationInfo.nativeLibraryDir),
-    ),
-)
+                LocalModelProvider(
+                    engine,
+                    EngineConfig(modelFile.absolutePath, nativeLibDir = applicationInfo.nativeLibraryDir),
+                ),
+            )
             ModelCatalog.freeRemoteSeeds().forEach { addDescriptor(it) }
             loadCatalog()
         }
+        val discovery = ModelDiscoveryService(registry, providerRegistry)
         setContent {
             OxygenOSTheme {
-                EngineScreen(engine = engine, registry = registry)
+                EngineScreen(
+                    engine = engine,
+                    registry = registry,
+                    providerRegistry = providerRegistry,
+                    prefs = prefs,
+                    discovery = discovery,
+                )
             }
         }
     }

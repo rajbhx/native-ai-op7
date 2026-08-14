@@ -15,7 +15,7 @@ data class ModelDescriptor(
     val kind: ModelKind,
     val costTier: ModelCostTier,
     val availability: ModelAvailability,
-    val contextLength: Int = 2048,
+    val contextLength: Int? = null,
     val maxOutputTokens: Int = 256,
     val supportsStreaming: Boolean = true,
     val supportsTools: Boolean = false,
@@ -28,6 +28,7 @@ data class ModelDescriptor(
     val speedScore: Int? = null,
     val reliabilityScore: Int? = null,
     val mutable: Boolean = true,
+    val lastUpdated: Long = 0,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -38,7 +39,7 @@ data class ModelDescriptor(
         put("kind", kind.name)
         put("cost_tier", costTier.name)
         put("availability", availability.name)
-        put("context_length", contextLength)
+        put("context_length", contextLength ?: JSONObject.NULL)
         put("max_output_tokens", maxOutputTokens)
         put("supports_streaming", supportsStreaming)
         put("supports_tools", supportsTools)
@@ -51,6 +52,7 @@ data class ModelDescriptor(
         put("speed_score", speedScore ?: JSONObject.NULL)
         put("reliability_score", reliabilityScore ?: JSONObject.NULL)
         put("mutable", mutable)
+        put("last_updated", lastUpdated)
     }
 
     companion object {
@@ -64,7 +66,7 @@ data class ModelDescriptor(
             costTier = runCatching { ModelCostTier.valueOf(j.getString("cost_tier")) }.getOrDefault(ModelCostTier.UNKNOWN),
             availability = runCatching { ModelAvailability.valueOf(j.getString("availability")) }
                 .getOrDefault(ModelAvailability.UNKNOWN),
-            contextLength = j.optInt("context_length", 2048),
+            contextLength = if (j.isNull("context_length")) null else j.optInt("context_length", -1).let { if (it < 0) null else it },
             maxOutputTokens = j.optInt("max_output_tokens", 256),
             supportsStreaming = j.optBoolean("supports_streaming", true),
             supportsTools = j.optBoolean("supports_tools", false),
@@ -77,6 +79,7 @@ data class ModelDescriptor(
             speedScore = if (j.isNull("speed_score")) null else j.optInt("speed_score", -1).let { if (it < 0) null else it },
             reliabilityScore = if (j.isNull("reliability_score")) null else j.optInt("reliability_score", -1).let { if (it < 0) null else it },
             mutable = j.optBoolean("mutable", true),
+            lastUpdated = j.optLong("last_updated", 0),
         )
     }
 }

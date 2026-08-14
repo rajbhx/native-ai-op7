@@ -11,7 +11,7 @@ class ModelInfoTool(private val registry: ModelRegistry) : AgentTool {
 
     override suspend fun execute(input: String): ToolOutput {
         val lines = registry.list().map { d ->
-            "${d.id} | ${d.provider} | ${d.kind} | ${d.costTier} | ctx=${d.contextLength} | " +
+            "${d.id} | ${d.provider} | ${d.kind} | ${d.costTier} | ctx=${d.contextLength ?: "UNKNOWN"} | " +
                 "tools=${d.supportsTools} | reasoning=${d.supportsReasoning} | ${d.availability}"
         }
         return if (lines.isEmpty()) {

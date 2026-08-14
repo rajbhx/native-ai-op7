@@ -32,4 +32,16 @@ enum class RoutingMode {
     LOCAL_FIRST,
     /** Network forbidden: local models only. */
     OFFLINE_ONLY,
+    /** Free remote models + local; paid models are never auto-selected. */
+    FREE_ONLY,
+}
+
+/** Privacy preference (spec: privacy). */
+enum class PrivacyMode {
+    /** Local llama.cpp only; remote requests are never sent. */
+    LOCAL_ONLY,
+    /** Local by default; remote only when needed, with a remote indicator. */
+    HYBRID,
+    /** Remote providers allowed; a remote indicator is still shown. */
+    REMOTE_ALLOWED,
 }

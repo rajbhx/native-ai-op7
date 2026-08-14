@@ -17,6 +17,7 @@ class ModelRouter(
         task: AgentTask,
         registry: ModelRegistry,
         excludeIds: Set<String> = emptySet(),
+        preferredId: String? = null,
     ): ModelDescriptor? {
         val candidates = registry.list().filter { d ->
             d.id !in excludeIds &&
@@ -24,6 +25,21 @@ class ModelRouter(
                 registry.provider(d.id) != null
         }
         if (candidates.isEmpty()) return null
+
+        // A user-picked model wins only when the current mode allows it
+        // (offline mode forbids remote; free-only forbids paid).
+        preferredId?.let { id ->
+            candidates.firstOrNull { it.id == id }?.let { d ->
+                val allowed = when (mode) {
+                    RoutingMode.OFFLINE_ONLY -> d.kind == ModelKind.LOCAL
+                    RoutingMode.FREE_ONLY ->
+                        d.kind == ModelKind.LOCAL ||
+                            (d.kind == ModelKind.REMOTE && d.costTier == ModelCostTier.FREE)
+                    else -> true
+                }
+                if (allowed && healthMonitor.isHealthy(d.id)) return d
+            }
+        }
 
         val local = candidates.filter { it.kind == ModelKind.LOCAL }
         val freeRemote = candidates.filter { it.kind == ModelKind.REMOTE && it.costTier == ModelCostTier.FREE }
@@ -38,6 +54,16 @@ class ModelRouter(
         when (mode) {
             RoutingMode.OFFLINE_ONLY ->
                 return pick(local)
+
+            RoutingMode.FREE_ONLY -> {
+                // Free remote models first, then local. Paid models are
+                // never selected automatically in this mode.
+                if (task.networkAvailable) {
+                    pick(freeRemote)?.let { return it }
+                }
+                pick(local)?.let { return it }
+                return null
+            }
 
             RoutingMode.LOCAL_FIRST -> {
                 pick(local)?.let { return it }

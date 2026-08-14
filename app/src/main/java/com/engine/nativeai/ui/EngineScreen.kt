@@ -64,10 +64,16 @@ import com.engine.nativeai.MemoryDatabase
 import com.engine.nativeai.MemorySearchTool
 import com.engine.nativeai.ModelCatalog
 import com.engine.nativeai.ModelCostTier
+import com.engine.nativeai.ModelDiscoveryService
+import com.engine.nativeai.ModelKind
 import com.engine.nativeai.ModelDescriptor
 import com.engine.nativeai.ModelInfoTool
 import com.engine.nativeai.ModelRegistry
+import com.engine.nativeai.ModelPreferencesStore
 import com.engine.nativeai.ModelRouter
+import com.engine.nativeai.OpenAICompatibleProvider
+import com.engine.nativeai.PrivacyMode
+import com.engine.nativeai.ProviderRegistry
 import com.engine.nativeai.NativeEngine
 import com.engine.nativeai.RoutingMode
 import com.engine.nativeai.SystemInfoTool
@@ -82,7 +88,13 @@ import kotlinx.coroutines.launch
  * Plain Compose, no external UI framework; design tokens from Theme.kt.
  */
 @Composable
-fun EngineScreen(engine: NativeEngine, registry: ModelRegistry) {
+fun EngineScreen(
+    engine: NativeEngine,
+    registry: ModelRegistry,
+    providerRegistry: ProviderRegistry,
+    prefs: ModelPreferencesStore,
+    discovery: ModelDiscoveryService,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val modelFile = remember { File(context.filesDir, "models/model.gguf") }
@@ -95,9 +107,20 @@ fun EngineScreen(engine: NativeEngine, registry: ModelRegistry) {
     var output by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
     var serviceOn by remember { mutableStateOf(false) }
-    var selectedMode by remember { mutableStateOf(0) }
+    var selectedMode by remember { mutableStateOf(modeIndexFor(prefs.routingMode)) }
+    var selectedModelId by remember { mutableStateOf(prefs.lastSelectedModelId ?: "local-llama") }
+    var favorites by remember { mutableStateOf(prefs.favorites()) }
+    var showPicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
+        // Refresh the catalog once on first launch (cached metadata is used
+        // afterwards; manual Refresh is always available in the picker).
+        if (registry.lastRefreshMs == 0L) {
+            val r = discovery.refresh()
+            if (r.error != null) {
+                status = "catalog: cached seeds (${r.error})"
+            }
+        }
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
@@ -110,8 +133,10 @@ fun EngineScreen(engine: NativeEngine, registry: ModelRegistry) {
         }
     }
 
-    val modes = listOf("Auto", "Free-First", "Offline")
-    val routingModes = listOf(RoutingMode.HYBRID, RoutingMode.FREE_FIRST, RoutingMode.OFFLINE_ONLY)
+    val modes = listOf("Auto", "Free-First", "Free Only", "Offline")
+    val routingModes = listOf(
+        RoutingMode.HYBRID, RoutingMode.FREE_FIRST, RoutingMode.FREE_ONLY, RoutingMode.OFFLINE_ONLY,
+    )
     val models = registry.list()
 
     Column(
@@ -209,8 +234,12 @@ fun EngineScreen(engine: NativeEngine, registry: ModelRegistry) {
                     context = context,
                     engine = engine,
                     registry = registry,
+                    providerRegistry = providerRegistry,
+                    prefs = prefs,
                     prompt = prompt,
                     mode = routingModes[selectedMode],
+                    modeLabel = modes[selectedMode],
+                    preferredId = selectedModelId,
                     loaded = loaded,
                     setRunning = { running = it },
                     setStatus = { status = it },
@@ -253,11 +282,62 @@ fun EngineScreen(engine: NativeEngine, registry: ModelRegistry) {
             modes.forEachIndexed { i, label ->
                 SegmentedPill(label, selected = i == selectedMode, Modifier.weight(1f)) {
                     selectedMode = i
+                    prefs.routingMode = routingModes[i]
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
-        models.forEach { ModelCard(it) }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Selected: ${selectedModelName(models, selectedModelId)}",
+                color = OpText,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            PillButton("Pick model", primary = true) { showPicker = true }
+        }
+        if (registry.lastRefreshMs > 0) {
+            Text(
+                "Catalog updated: ${formatCatalogTime(registry.lastRefreshMs)} · ${models.size} models",
+                color = OpTextSecondary,
+                fontSize = 10.sp,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        models.filter { it.id == selectedModelId }.forEach { ModelCard(it) }
+        Spacer(Modifier.height(4.dp))
+        if (showPicker) {
+            ModelPickerDialog(
+                models = models,
+                selectedId = selectedModelId,
+                lastUpdated = registry.lastRefreshMs,
+                favorites = favorites,
+                onSelect = { d ->
+                    selectedModelId = d.id
+                    prefs.lastSelectedModelId = d.id
+                    if (d.kind == ModelKind.REMOTE) {
+                        ensureRemoteProvider(registry, providerRegistry, prefs, d)
+                    }
+                    showPicker = false
+                },
+                onToggleFavorite = { id ->
+                    favorites = prefs.toggleFavorite(id)
+                },
+                onRefresh = {
+                    scope.launch {
+                        val r = discovery.refresh()
+                        status = if (r.error == null) {
+                            "discovery: ${r.found} new models, ${registry.list().size} total (${r.endpoint})"
+                        } else {
+                            "discovery failed: ${r.error} (using cached catalog)"
+                        }
+                    }
+                },
+                onDismiss = { showPicker = false },
+            )
+        }
 
         Spacer(Modifier.height(18.dp))
         Text("AGENT TRACE", color = OpText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
@@ -287,17 +367,27 @@ private fun runAgent(
     context: Context,
     engine: NativeEngine,
     registry: ModelRegistry,
+    providerRegistry: ProviderRegistry,
+    prefs: ModelPreferencesStore,
     prompt: String,
     mode: RoutingMode,
+    modeLabel: String,
+    preferredId: String?,
     loaded: Boolean,
     setRunning: (Boolean) -> Unit,
     setStatus: (String) -> Unit,
     setOutput: (String) -> Unit,
     scope: kotlinx.coroutines.CoroutineScope,
 ) {
-    if (!loaded) {
-        setStatus("Load a model first.")
+    if (!loaded && preferredId == "local-llama") {
+        setStatus("Load the local model first (Load model), or pick a remote model.")
         return
+    }
+    // Privacy: Local Only forces offline routing regardless of the mode.
+    val effectiveMode = if (prefs.privacyMode == PrivacyMode.LOCAL_ONLY) {
+        RoutingMode.OFFLINE_ONLY
+    } else {
+        mode
     }
     setRunning(true)
     setOutput("")
@@ -314,11 +404,12 @@ private fun runAgent(
             register(FinalAnswerTool())
         }
         val agent = ThinkingAgent(
-            router = ModelRouter(mode = mode),
+            router = ModelRouter(mode = effectiveMode),
             registry = registry,
             memory = memory,
             tools = tools,
             networkAvailable = hasNetwork(context),
+            preferredId = preferredId,
         )
         val sessionId = memory.startSession("agent: ${prompt.take(60)}")
         try {
@@ -335,7 +426,14 @@ private fun runAgent(
                         setOutput(sb.toString())
                     }
                     is AgentEvent.Routed -> {
-                        sb.append(" [${ev.modelId} | ${ev.provider} | ${ev.costTier} | ${ev.taskType}]\n")
+                        val remote = ev.provider != "local"
+                        sb.append(
+                            "\nMODEL ${ev.modelId}" +
+                                "\nPROVIDER ${ev.provider}" +
+                                "\nMODE ${if (remote) "Remote (${modeLabel})" else modeLabel}" +
+                                "\nSTATUS ${if (remote) "Running · remote request" else "Running · local"}" +
+                                "\n[${ev.taskType} | ${ev.costTier}]\n",
+                        )
                         setOutput(sb.toString())
                     }
                     is AgentEvent.ToolCall -> {
@@ -414,6 +512,37 @@ private fun SegmentedPill(
     }
 }
 
+private fun modeIndexFor(mode: RoutingMode): Int = when (mode) {
+    RoutingMode.HYBRID -> 0
+    RoutingMode.FREE_FIRST -> 1
+    RoutingMode.FREE_ONLY -> 2
+    RoutingMode.OFFLINE_ONLY -> 3
+}
+
+private fun selectedModelName(models: List<ModelDescriptor>, id: String?): String =
+    models.firstOrNull { it.id == id }?.displayName ?: (id ?: "none")
+
+private fun formatCatalogTime(epochMs: Long): String {
+    val f = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+    return f.format(java.util.Date(epochMs))
+}
+
+private fun ensureRemoteProvider(
+    registry: ModelRegistry,
+    providerRegistry: ProviderRegistry,
+    prefs: ModelPreferencesStore,
+    d: ModelDescriptor,
+) {
+    if (registry.provider(d.id) != null) return
+    // Key lives in memory only (runtime entry); never persisted, never logged.
+    registry.register(
+        OpenAICompatibleProvider(
+            descriptor = d,
+            apiKey = providerRegistry.apiKey(d.provider),
+        ),
+    )
+}
+
 @Composable
 private fun ModelCard(d: ModelDescriptor) {
     Column(
@@ -440,7 +569,7 @@ private fun ModelCard(d: ModelDescriptor) {
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            "provider ${d.provider} · ctx ${d.contextLength} · tools ${yn(d.supportsTools)} · " +
+            "provider ${d.provider} · ctx ${d.contextLength ?: "UNKNOWN"} · tools ${yn(d.supportsTools)} · " +
                 "vision ${yn(d.supportsVision)} · coding ${d.codingScore ?: "?"} · " +
                 "reasoning ${d.reasoningScore ?: "?"} · ${d.availability}",
             color = OpTextSecondary,

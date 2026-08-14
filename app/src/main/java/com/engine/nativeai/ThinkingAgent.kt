@@ -26,6 +26,7 @@ class ThinkingAgent(
     private val networkAvailable: Boolean = true,
     private val allowPaid: Boolean = false,
     private val preferLocal: Boolean = false,
+    private val preferredId: String? = null,
 ) {
     fun run(
         userPrompt: String,
@@ -55,7 +56,7 @@ class ThinkingAgent(
                 preferLocal = preferLocal,
             )
 
-            var descriptor = router.route(task, registry) ?: run {
+            var descriptor = router.route(task, registry, preferredId = preferredId) ?: run {
                 emit(AgentEvent.Error("no model available (mode=${router.mode}, network=$networkAvailable)"))
                 return@flow
             }
@@ -88,7 +89,7 @@ class ThinkingAgent(
                 val userCtx = contextManager.build("", userPrompt, ctx, observations)
                 val request = ModelRequest(
                     system = systemPrompt(),
-                    prompt = ContextAdapter.fit(userCtx.trim(), descriptor.contextLength),
+                    prompt = ContextAdapter.fit(userCtx.trim(), descriptor.contextLength ?: 2048),
                     maxTokens = config.maxTokens,
                     temperature = config.temperature,
                     stopSequences = config.stopSequences,
