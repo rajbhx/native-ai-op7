@@ -11,7 +11,7 @@ class WebSearchToolTest {
     fun localFallbackIsExplicitlyUnavailable() = runBlocking {
         val out = WebSearchTool(LocalFallbackProvider()).execute("test query")
         assertFalse(out.ok)
-        assertTrue(out.text.contains("unavailable"))
+        assertTrue(out.output.contains("unavailable"))
     }
 
     @Test
@@ -21,7 +21,7 @@ class WebSearchToolTest {
         }
         val out = WebSearchTool(provider).execute("weather")
         assertTrue(out.ok)
-        assertEquals("result for weather", out.text)
+        assertEquals("result for weather", out.output)
     }
 
     @Test
