@@ -6,12 +6,15 @@ package com.engine.nativeai
  * nothing so the agent degrades gracefully without network keys.
  */
 interface SearchProvider {
-    suspend fun search(query: String): String
+    /** @return result text plus an ok flag; ok=false when no provider answered */
+    suspend fun search(query: String): SearchResult
 }
 
+data class SearchResult(val text: String, val ok: Boolean)
+
 class LocalFallbackProvider : SearchProvider {
-    override suspend fun search(query: String): String =
-        "web search unavailable (no provider configured)"
+    override suspend fun search(query: String): SearchResult =
+        SearchResult("web search unavailable (no provider configured)", ok = false)
 }
 
 class WebSearchTool(private val provider: SearchProvider) : AgentTool {
@@ -21,6 +24,6 @@ class WebSearchTool(private val provider: SearchProvider) : AgentTool {
 
     override suspend fun execute(input: String): ToolOutput {
         val result = provider.search(input)
-        return ToolOutput(name, result, result.isNotBlank() && !result.startsWith("web search unavailable"))
+        return ToolOutput(name, result.text, result.ok && result.text.isNotBlank())
     }
 }
