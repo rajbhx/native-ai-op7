@@ -16,6 +16,9 @@ public:
         int32_t threads = 4;
         int32_t gpu_layers = 0;
         int32_t n_ctx = 2048;
+        // App nativeLibraryDir; on Android the CPU backend .so lives there
+        // (dlopen search paths do not include it by default).
+        std::string native_lib_dir;
         // Blueprint Phase 2: pin llama worker threads to the high (Gold/Prime)
         // cores. Measured on-device before any default is trusted (ADR-009).
         bool pin_high_cores = true;

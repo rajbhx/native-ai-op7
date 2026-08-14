@@ -31,13 +31,15 @@ Java_com_engine_nativeai_NativeEngine_nativeInit(JNIEnv* env, jobject,
                                                  jstring model_path,
                                                  jint threads, jint gpu_layers,
                                                  jint n_ctx,
-                                                 jboolean pin_high_cores) {
+                                                 jboolean pin_high_cores,
+                                                 jstring native_lib_dir) {
     NativeEngine::Config cfg;
     cfg.model_path = jstring_to_utf8(env, model_path);
     cfg.threads = threads > 0 ? threads : 4;
     cfg.gpu_layers = gpu_layers;
     cfg.n_ctx = n_ctx > 0 ? n_ctx : 2048;
     cfg.pin_high_cores = pin_high_cores == JNI_TRUE;
+    cfg.native_lib_dir = jstring_to_utf8(env, native_lib_dir);
     return g_engine.init(cfg) ? JNI_TRUE : JNI_FALSE;
 }
 

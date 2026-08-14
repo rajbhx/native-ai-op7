@@ -32,6 +32,7 @@ class NativeEngine : AutoCloseable {
             config.gpuLayers,
             config.contextSize,
             config.pinHighCores,
+            config.nativeLibDir,
         )
         check(loaded) { "nativeInit failed for ${config.modelPath}" }
     }

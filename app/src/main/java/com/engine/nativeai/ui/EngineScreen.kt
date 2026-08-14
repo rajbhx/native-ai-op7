@@ -148,7 +148,12 @@ fun EngineScreen(engine: NativeEngine, registry: ModelRegistry) {
                         "Model not found:\n${modelFile.absolutePath}\nCopy a GGUF there, then retry."
                     } else {
                         try {
-                            engine.init(EngineConfig(modelFile.absolutePath))
+                            engine.init(
+    EngineConfig(
+        modelFile.absolutePath,
+        nativeLibDir = context.applicationInfo.nativeLibraryDir,
+    ),
+)
                             loaded = true
                             "Model loaded: ${modelFile.name}"
                         } catch (e: Exception) {

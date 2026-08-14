@@ -19,7 +19,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val modelFile = File(filesDir, "models/model.gguf")
         val registry = ModelRegistry(File(filesDir, "models/catalog.json")).apply {
-            register(LocalModelProvider(engine, EngineConfig(modelFile.absolutePath)))
+            register(
+    LocalModelProvider(
+        engine,
+        EngineConfig(modelFile.absolutePath, nativeLibDir = applicationInfo.nativeLibraryDir),
+    ),
+)
             ModelCatalog.freeRemoteSeeds().forEach { addDescriptor(it) }
             loadCatalog()
         }

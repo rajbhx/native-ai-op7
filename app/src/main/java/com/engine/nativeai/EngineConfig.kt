@@ -13,4 +13,7 @@ data class EngineConfig(
     // Blueprint Phase 2: pin llama worker threads to Gold/Prime cores (4-7).
     // Measured on-device before any default is trusted (ADR-009).
     val pinHighCores: Boolean = true,
+    // App nativeLibraryDir so ggml can dlopen the CPU backend variants on
+    // Android (GGML_BACKEND_DL default search paths miss the APK lib dir).
+    val nativeLibDir: String = "",
 )

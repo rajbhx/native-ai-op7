@@ -55,6 +55,12 @@ bool NativeEngine::init(const Config& config) {
     config_ = config;
     cancel_.store(false);
 
+    if (!config_.native_lib_dir.empty()) {
+        // GGML_BACKEND_DL searches the executable dir + cwd, neither of which
+        // is the APK lib dir on Android; load the CPU backend variants from
+        // the app's nativeLibraryDir explicitly before backend init.
+        ggml_backend_load_all_from_path(config_.native_lib_dir.c_str());
+    }
     llama_log_set(log_to_logcat, nullptr);
     llama_backend_init();
 
