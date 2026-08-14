@@ -99,3 +99,8 @@ sections:
         cause: "AGP default extractNativeLibs=false packs .so in APK so nativeLibraryDir is empty; ggml_backend_load_all() searched exec dir + cwd only"
         solution: "android:extractNativeLibs=true + ggml_backend_load_all_from_path(nativeLibraryDir) before llama_backend_init; verified on-device init OK (RSS 729 MB, Qwen0.5B Q4_K_M, contended)"
         tags: [llama.cpp, ggml, android, jni, apk]
+      - id: A20
+        problem: "Agent button crash: SQLiteException no such module: fts5"
+        cause: "OP7 OxygenOS Android 10 SQLite lacks the FTS5 extension; MemoryDatabase.onCreate DDL failed and startSession ran outside try/catch -> uncaught coroutine crash"
+        solution: "detect FTS5 availability (try/catch DDL), fall back to bounded LIKE term-hit retrieval; wrap startSession/endSession so memory failure degrades gracefully"
+        tags: [sqlite, fts5, memory, crash, oneplus]

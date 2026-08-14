@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteException
 import android.database.sqlite.SQLiteOpenHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,6 +18,10 @@ import kotlinx.coroutines.withContext
  */
 class MemoryDatabase(context: Context) :
     SQLiteOpenHelper(context, "memory.db", null, SCHEMA_VERSION) {
+
+    /** False when the platform SQLite lacks the FTS5 module (seen on OP7/OxygenOS
+     *  Android 10: "no such module: fts5"); retrieval falls back to LIKE matching. */
+    private var ftsAvailable = true
 
     companion object {
         private const val SCHEMA_VERSION = 1
@@ -40,41 +45,48 @@ class MemoryDatabase(context: Context) :
                 timestamp INTEGER NOT NULL
             )""",
         )
-        // External-content FTS5 index; triggers keep it in sync.
-        db.execSQL(
-            """CREATE VIRTUAL TABLE experiences_fts USING fts5(
-                problem_summary, approach_summary, tool_used, result_summary,
-                content='experiences', content_rowid='id'
-            )""",
-        )
-        db.execSQL(
-            """CREATE TRIGGER experiences_ai AFTER INSERT ON experiences BEGIN
-                INSERT INTO experiences_fts(rowid, problem_summary, approach_summary,
-                    tool_used, result_summary)
-                VALUES (new.id, new.problem_summary, new.approach_summary,
-                    new.tool_used, new.result_summary);
-            END""",
-        )
-        db.execSQL(
-            """CREATE TRIGGER experiences_ad AFTER DELETE ON experiences BEGIN
-                INSERT INTO experiences_fts(experiences_fts, rowid, problem_summary,
-                    approach_summary, tool_used, result_summary)
-                VALUES ('delete', old.id, old.problem_summary, old.approach_summary,
-                    old.tool_used, old.result_summary);
-            END""",
-        )
-        db.execSQL(
-            """CREATE TRIGGER experiences_au AFTER UPDATE ON experiences BEGIN
-                INSERT INTO experiences_fts(experiences_fts, rowid, problem_summary,
-                    approach_summary, tool_used, result_summary)
-                VALUES ('delete', old.id, old.problem_summary, old.approach_summary,
-                    old.tool_used, old.result_summary);
-                INSERT INTO experiences_fts(rowid, problem_summary, approach_summary,
-                    tool_used, result_summary)
-                VALUES (new.id, new.problem_summary, new.approach_summary,
-                    new.tool_used, new.result_summary);
-            END""",
-        )
+        // External-content FTS5 index; triggers keep it in sync. Some OEM
+        // SQLite builds (OP7/OxygenOS Android 10) ship without the fts5
+        // module, so degrade gracefully instead of failing schema creation.
+        try {
+            db.execSQL(
+                """CREATE VIRTUAL TABLE experiences_fts USING fts5(
+                    problem_summary, approach_summary, tool_used, result_summary,
+                    content='experiences', content_rowid='id'
+                )""",
+            )
+            db.execSQL(
+                """CREATE TRIGGER experiences_ai AFTER INSERT ON experiences BEGIN
+                    INSERT INTO experiences_fts(rowid, problem_summary, approach_summary,
+                        tool_used, result_summary)
+                    VALUES (new.id, new.problem_summary, new.approach_summary,
+                        new.tool_used, new.result_summary);
+                END""",
+            )
+            db.execSQL(
+                """CREATE TRIGGER experiences_ad AFTER DELETE ON experiences BEGIN
+                    INSERT INTO experiences_fts(experiences_fts, rowid, problem_summary,
+                        approach_summary, tool_used, result_summary)
+                    VALUES ('delete', old.id, old.problem_summary, old.approach_summary,
+                        old.tool_used, old.result_summary);
+                END""",
+            )
+            db.execSQL(
+                """CREATE TRIGGER experiences_au AFTER UPDATE ON experiences BEGIN
+                    INSERT INTO experiences_fts(experiences_fts, rowid, problem_summary,
+                        approach_summary, tool_used, result_summary)
+                    VALUES ('delete', old.id, old.problem_summary, old.approach_summary,
+                        old.tool_used, old.result_summary);
+                    INSERT INTO experiences_fts(rowid, problem_summary, approach_summary,
+                        tool_used, result_summary)
+                    VALUES (new.id, new.problem_summary, new.approach_summary,
+                        new.tool_used, new.result_summary);
+                END""",
+            )
+            ftsAvailable = true
+        } catch (e: SQLiteException) {
+            ftsAvailable = false
+        }
         db.execSQL(
             """CREATE TABLE semantic_facts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -395,8 +407,14 @@ class MemoryDatabase(context: Context) :
     private data class FtsCandidate(val rank: Float, val experience: Experience)
 
     private fun ftsCandidates(query: String, limit: Int): List<FtsCandidate> {
-        val match = query.split(Regex("\\s+"))
-            .filter { it.isNotBlank() }
+        val terms = query.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (terms.isEmpty()) return emptyList()
+        return if (ftsAvailable) fts5Candidates(terms, limit) else likeCandidates(terms, limit)
+    }
+
+    /** BM25-ranked candidates when FTS5 is available (spec §2.B). */
+    private fun fts5Candidates(terms: List<String>, limit: Int): List<FtsCandidate> {
+        val match = terms
             .joinToString(" OR ") { "\"" + it.replace("\"", "").replace("*", "") + "\"" }
         if (match.isBlank()) return emptyList()
         val cursor = readableDatabase.rawQuery(
@@ -421,6 +439,28 @@ class MemoryDatabase(context: Context) :
                 }
             }
         }
+    }
+
+    /** LIKE-based fallback when the platform SQLite has no FTS5 module.
+     *  Approximate ranking: more matched query terms (across any text column)
+     *  ranks higher; newest wins ties. Bounded scan keeps it cheap. */
+    private fun likeCandidates(terms: List<String>, limit: Int): List<FtsCandidate> {
+        val cursor = readableDatabase.rawQuery(
+            "SELECT * FROM experiences ORDER BY timestamp DESC LIMIT 2000", null,
+        )
+        return cursor.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    val e = c.toExperience()
+                    val hits = terms.count { term ->
+                        e.problemSummary.contains(term, ignoreCase = true) ||
+                            e.approachSummary.contains(term, ignoreCase = true) ||
+                            e.resultSummary.contains(term, ignoreCase = true)
+                    }
+                    if (hits > 0) add(FtsCandidate(-hits.toFloat(), e))
+                }
+            }.sortedWith(compareBy({ it.rank }, { -it.experience.timestamp }))
+        }.take(limit)
     }
 
     private fun syncExperienceUtility() {

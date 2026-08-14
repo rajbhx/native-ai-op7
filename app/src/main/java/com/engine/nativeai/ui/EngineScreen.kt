@@ -477,7 +477,11 @@ private fun runAgent(
             networkAvailable = hasNetwork(context),
             preferredId = preferredId,
         )
-        val sessionId = memory.startSession("agent: ${prompt.take(60)}")
+        val sessionId = try {
+            memory.startSession("agent: ${prompt.take(60)}")
+        } catch (e: Exception) {
+            null // memory failure must never crash the agent
+        }
         try {
             val sb = StringBuilder()
             var done = false
@@ -527,7 +531,13 @@ private fun runAgent(
         } catch (e: Exception) {
             setStatus("agent failed: ${e.message}")
         } finally {
-            memory.endSession(sessionId)
+            if (sessionId != null) {
+                try {
+                    memory.endSession(sessionId)
+                } catch (_: Exception) {
+                    // best-effort session close
+                }
+            }
             setRunning(false)
         }
     }

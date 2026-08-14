@@ -23,3 +23,10 @@
 - Thread selector (2-6) added to Model Hub; Load model now close()+init so thread changes apply without app restart.
 - Model catalog discovery works live: 62 models from https://opencode.ai/zen/v1/models, incl. big-pickle, deepseek-v4-flash-free, mimo-v2.5-free, nemotron-3-ultra-free; user-spec ids ling-3.0-flash-free/north-mini-code-free absent at refresh time — proves the list must stay dynamic.
 - CI artifact install route: python3 -m http.server in proot + shizuku curl to /data/local/tmp + pm install -t (SELinux blocks pm from reading /sdcard).
+
+## Follow-up (same day)
+- **P** clicking "Agent" crashes the app: SQLiteException "no such module: fts5 (code 1)"
+  cause: OP7/OxygenOS Android 10 platform SQLite ships without the FTS5 extension; CREATE VIRTUAL TABLE ... USING fts5 failed inside MemoryDatabase.onCreate, and startSession ran outside the agent's try/catch -> uncaught coroutine exception -> FATAL EXCEPTION
+  solution: MemoryDatabase detects FTS5 availability (try/catch around FTS5 DDL + triggers) and falls back to bounded LIKE retrieval (term-hit ranking, newest-first ties); runAgent now wraps startSession/endSession so memory failures degrade gracefully instead of crashing
+  section: A
+  tags: [sqlite, fts5, memory, crash, oneplus, oxygenos]
