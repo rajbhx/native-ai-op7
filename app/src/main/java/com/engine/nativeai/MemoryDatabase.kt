@@ -212,7 +212,7 @@ class MemoryDatabase(context: Context) :
     fun markFactVerified(factId: Long) {
         writableDatabase.execSQL(
             "UPDATE semantic_facts SET last_verified = ? WHERE id = ?",
-            arrayOf(System.currentTimeMillis(), factId),
+            arrayOf<Any>(System.currentTimeMillis(), factId),
         )
     }
 
@@ -220,7 +220,7 @@ class MemoryDatabase(context: Context) :
     fun markExperienceUsed(experienceId: Long) {
         writableDatabase.execSQL(
             "UPDATE memory_scores SET last_used = ? WHERE memory_type = 'experience' AND memory_id = ?",
-            arrayOf(System.currentTimeMillis(), experienceId),
+            arrayOf<Any>(System.currentTimeMillis(), experienceId),
         )
     }
 
@@ -295,7 +295,7 @@ class MemoryDatabase(context: Context) :
             """UPDATE memory_scores
                SET utility = utility * exp(-0.02 * ((? - last_used) / 86400000.0))
                WHERE last_used > 0 AND (? - last_used) > 0""",
-            arrayOf(now, now),
+            arrayOf<Any>(now, now),
         )
         syncExperienceUtility()
     }
@@ -304,14 +304,14 @@ class MemoryDatabase(context: Context) :
         val cutoff = System.currentTimeMillis() - 30 * DAY_MS
         writableDatabase.execSQL(
             "DELETE FROM experiences WHERE utility_score < ? AND timestamp < ?",
-            arrayOf(threshold, cutoff),
+            arrayOf<Any>(threshold, cutoff),
         )
         writableDatabase.execSQL(
             """DELETE FROM semantic_facts WHERE id IN (
                 SELECT f.id FROM semantic_facts f
                 JOIN memory_scores s ON s.memory_type = 'fact' AND s.memory_id = f.id
                 WHERE s.utility < ? AND f.created < ?)""",
-            arrayOf(threshold, cutoff),
+            arrayOf<Any>(threshold, cutoff),
         )
     }
 
@@ -319,7 +319,7 @@ class MemoryDatabase(context: Context) :
         val cutoff = System.currentTimeMillis() - maxAgeDays * DAY_MS
         val cursor = readableDatabase.rawQuery(
             "SELECT * FROM semantic_facts WHERE last_verified < ? ORDER BY last_verified ASC",
-            arrayOf(cutoff),
+            arrayOf(cutoff.toString()),
         )
         cursor.use { c -> buildList { while (c.moveToNext()) add(c.toFact()) } }
     }
@@ -352,7 +352,7 @@ class MemoryDatabase(context: Context) :
                JOIN experiences e ON e.id = experiences_fts.rowid
                WHERE experiences_fts MATCH ?
                ORDER BY bm25(experiences_fts) LIMIT ?""",
-            arrayOf(match, limit),
+            arrayOf(match, limit.toString()),
         )
         return cursor.use { c -> buildList { while (c.moveToNext()) add(c.toExperience()) } }
     }
