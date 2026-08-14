@@ -1,0 +1,20 @@
+package com.engine.nativeai
+
+/** Agent tool exposing the model catalog (spec §11: model_info). */
+class ModelInfoTool(private val registry: ModelRegistry) : AgentTool {
+    override val name = "model_info"
+    override val description =
+        "List available models, providers, cost tiers and capabilities. Input: ignored."
+
+    override suspend fun execute(input: String): ToolResult {
+        val lines = registry.list().map { d ->
+            "${d.id} | ${d.provider} | ${d.kind} | ${d.costTier} | ctx=${d.contextLength} | " +
+                "tools=${d.supportsTools} | reasoning=${d.supportsReasoning} | ${d.availability}"
+        }
+        return if (lines.isEmpty()) {
+            ToolResult(name, "no models registered", false, null)
+        } else {
+            ToolResult(name, lines.joinToString("\n"), true)
+        }
+    }
+}

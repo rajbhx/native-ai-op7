@@ -1,0 +1,35 @@
+package com.engine.nativeai
+
+/** Model classification enums for the provider abstraction layer. */
+
+/** Local on-device model vs remote (network) model. */
+enum class ModelKind { LOCAL, REMOTE }
+
+/** Cost tier declared by a provider; PAID requires explicit user permission. */
+enum class ModelCostTier { FREE, PAID, UNKNOWN }
+
+/** Availability is live metadata, never assumed. */
+enum class ModelAvailability { AVAILABLE, LIMITED, UNAVAILABLE, UNKNOWN }
+
+/** Provider-neutral capability flags (spec §5). */
+enum class ModelCapability {
+    TOOLS, VISION, REASONING, STREAMING, STRUCTURED_OUTPUT, EMBEDDINGS, CODING, LONG_CONTEXT,
+}
+
+/** Task classification produced by TaskClassifier (spec §7). */
+enum class TaskType {
+    CHAT, RESEARCH, CODING, DEBUGGING, REASONING, SUMMARIZATION,
+    DOCUMENT_ANALYSIS, TOOL_EXECUTION, VISION, LONG_CONTEXT, OFFLINE_TASK,
+}
+
+/** Routing preference (spec §8-10, §20). */
+enum class RoutingMode {
+    /** Default: local for simple requests, free remote for complex, local fallback. */
+    HYBRID,
+    /** Prefer free remote models, then local, then paid only if permitted. */
+    FREE_FIRST,
+    /** Prefer the local llama.cpp model, remote only when needed. */
+    LOCAL_FIRST,
+    /** Network forbidden: local models only. */
+    OFFLINE_ONLY,
+}

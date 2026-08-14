@@ -1,5 +1,6 @@
 package com.engine.nativeai
 
+import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -8,14 +9,21 @@ import kotlinx.coroutines.withContext
 /**
  * ReAct-style orchestrator (spec §11): memory retrieval -> model -> tool
  * selection (JSON) -> execution -> observation -> loop -> final answer.
- * Structured actions only; max iterations; every step is streamed as events.
+ *
+ * The kernel depends only on ModelRouter/ModelRegistry — never on a specific
+ * provider (spec §1). Fallback chain per step: primary -> next candidate
+ * (free remote) -> local -> graceful failure, max 3 attempts (spec §14).
  */
 class ThinkingAgent(
-    private val engine: NativeEngine,
+    private val router: ModelRouter,
+    private val registry: ModelRegistry,
     private val memory: MemoryDatabase,
     private val tools: ToolRegistry,
     private val maxIterations: Int = 5,
     private val contextManager: ContextManager = ContextManager(),
+    private val networkAvailable: Boolean = true,
+    private val allowPaid: Boolean = false,
+    private val preferLocal: Boolean = false,
 ) {
     fun run(
         userPrompt: String,
@@ -24,30 +32,98 @@ class ThinkingAgent(
         var state = AgentState.THINKING
         val observations = mutableListOf<String>()
         val executor = ToolExecutor(tools, memory)
+        val taskType = TaskClassifier.classify(userPrompt, networkAvailable)
 
         repeat(maxIterations) {
             if (state == AgentState.CANCELLED) return@flow
 
+            val task = AgentTask(
+                prompt = userPrompt,
+                taskType = taskType,
+                requiredCapabilities = setOf(ModelCapability.TOOLS, ModelCapability.STREAMING),
+                contextLength = contextManager.maxTokens,
+                networkAvailable = networkAvailable,
+                allowPaid = allowPaid,
+                preferLocal = preferLocal,
+            )
+
+            var descriptor = router.route(task, registry)
+            if (descriptor == null) {
+                emit(AgentEvent.Error("no model available (mode=${router.mode}, network=$networkAvailable)"))
+                return@flow
+            }
+            emit(AgentEvent.Routed(descriptor.id, descriptor.provider, descriptor.costTier, taskType))
+
             val memoryCtx = withContext(Dispatchers.IO) {
                 memory.searchContext(userPrompt, topK = 3)
+            }.let {
+                if (descriptor.kind == ModelKind.REMOTE) MemoryPrivacyFilter.forRemote(it) else it
             }
-            val prompt = contextManager.build(
-                systemPrompt(),
-                userPrompt,
-                memoryCtx,
-                observations,
-            )
 
             state = AgentState.THINKING
             val sb = StringBuilder()
-            engine.generateStream(prompt, config).collect { token ->
-                sb.append(token)
-                emit(AgentEvent.Token(token))
+            var provider = registry.providerFor(descriptor)
+            if (provider == null) {
+                emit(AgentEvent.Error("provider for ${descriptor.id} not registered"))
+                return@flow
+            }
+
+            var attempts = 0
+            var generated = false
+            while (attempts < 3 && !generated) {
+                attempts++
+                val ctx = if (descriptor.kind == ModelKind.REMOTE) {
+                    MemoryPrivacyFilter.forRemote(memoryCtx)
+                } else {
+                    memoryCtx
+                }
+                val userCtx = contextManager.build("", userPrompt, ctx, observations)
+                val request = ModelRequest(
+                    system = systemPrompt(),
+                    prompt = ContextAdapter.fit(userCtx.trim(), descriptor.contextLength),
+                    maxTokens = config.maxTokens,
+                    temperature = config.temperature,
+                    stopSequences = config.stopSequences,
+                )
+                try {
+                    provider.stream(request).collect { ev ->
+                        when (ev) {
+                            is ModelStreamEvent.Token -> {
+                                sb.append(ev.text)
+                                emit(AgentEvent.Token(ev.text))
+                            }
+                            is ModelStreamEvent.Reasoning -> emit(AgentEvent.Token(ev.text))
+                            is ModelStreamEvent.Done -> generated = true
+                            is ModelStreamEvent.Error -> throw IOException(ev.message)
+                        }
+                    }
+                    router.reportSuccess(descriptor.id)
+                    generated = true
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    router.reportFailure(descriptor.id, e.message ?: "generation failed")
+                    if (attempts >= 3) {
+                        emit(AgentEvent.Error("provider ${descriptor.id} failed after $attempts attempts: ${e.message}"))
+                        return@flow
+                    }
+                    val fallback = router.route(task, registry, excludeIds = setOf(descriptor.id))
+                    if (fallback == null) {
+                        emit(AgentEvent.Error("no fallback model available: ${e.message}"))
+                        return@flow
+                    }
+                    descriptor = fallback
+                    provider = registry.providerFor(descriptor) ?: continue
+                    emit(AgentEvent.Routed(descriptor.id, descriptor.provider, descriptor.costTier, taskType))
+                }
+            }
+            if (!generated) {
+                emit(AgentEvent.Error("generation produced no output"))
+                return@flow
             }
 
             val action = ActionParser.parse(sb.toString())
             if (action == null) {
-                // No structured action: treat the generated text as the answer.
                 state = AgentState.FINAL
                 val answer = sb.toString().trim()
                 withContext(Dispatchers.IO) {
@@ -66,6 +142,7 @@ class ThinkingAgent(
             observations.add("${action.name}: ${result.output.take(400)}")
             state = AgentState.OBSERVING
             emit(AgentEvent.Observation(action.name, result.output))
+            emit(AgentEvent.Verification(action.name, result.ok))
 
             if (action.name == "final_answer") {
                 state = AgentState.FINAL

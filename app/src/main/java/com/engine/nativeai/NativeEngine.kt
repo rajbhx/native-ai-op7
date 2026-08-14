@@ -18,6 +18,8 @@ interface TokenCallback {
 class NativeEngine : AutoCloseable {
     private var loaded = false
 
+    val isLoaded: Boolean get() = loaded
+
     init {
         System.loadLibrary("native-lib")
     }

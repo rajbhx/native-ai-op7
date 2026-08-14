@@ -1,25 +1,35 @@
 package com.engine.nativeai
 
 import android.app.Activity
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
+import android.widget.Spinner
 import android.widget.TextView
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import java.io.File
 
 /**
- * Minimal test UI for the engine (phase 1/2 device validation). Not a product
- * UI: load a GGUF model, generate, inspect memory/backend stats.
+ * Minimal test UI for the engine (phase 1-3 device validation). Not a product
+ * UI: load a GGUF model, generate, inspect memory/backend stats, run the
+ * routed agent with a visible model trace.
  */
 class MainActivity : Activity() {
     private val engine = NativeEngine()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private lateinit var registry: ModelRegistry
     private var loaded = false
+    private val modes = listOf(
+        RoutingMode.HYBRID, RoutingMode.LOCAL_FIRST, RoutingMode.FREE_FIRST, RoutingMode.OFFLINE_ONLY,
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,7 +42,20 @@ class MainActivity : Activity() {
         val genBtn = findViewById<Button>(R.id.generate_btn)
         val statsBtn = findViewById<Button>(R.id.stats_btn)
         val agentBtn = findViewById<Button>(R.id.agent_btn)
+        val modeSpinner = findViewById<Spinner>(R.id.mode_spinner)
         val modelFile = File(filesDir, "models/model.gguf")
+
+        registry = ModelRegistry(File(filesDir, "models/catalog.json")).apply {
+            register(LocalModelProvider(engine, EngineConfig(modelFile.absolutePath)))
+            ModelCatalog.freeRemoteSeeds().forEach { addDescriptor(it) }
+            loadCatalog()
+        }
+
+        modeSpinner.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_item, modes.map { it.name },
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
 
         status.text = "Engine library loaded. Put a GGUF at:\n${modelFile.absolutePath}"
 
@@ -93,9 +116,16 @@ class MainActivity : Activity() {
                     register(SystemInfoTool(engine, memory))
                     register(WebSearchTool(LocalFallbackProvider()))
                     register(FileSearchTool(filesDir))
+                    register(ModelInfoTool(registry))
                     register(FinalAnswerTool())
                 }
-                val agent = ThinkingAgent(engine, memory, tools)
+                val agent = ThinkingAgent(
+                    router = ModelRouter(mode = modes[modeSpinner.selectedItemPosition]),
+                    registry = registry,
+                    memory = memory,
+                    tools = tools,
+                    networkAvailable = hasNetwork(),
+                )
                 try {
                     val sb = StringBuilder()
                     var done = false
@@ -106,12 +136,22 @@ class MainActivity : Activity() {
                                     sb.append(ev.text)
                                     output.text = sb.toString()
                                 }
+                                is AgentEvent.Routed -> {
+                                    sb.append("\n\n[model] ${ev.modelId} | ${ev.provider} | " +
+                                        "${ev.costTier} | ${ev.taskType}\n")
+                                    output.text = sb.toString()
+                                }
                                 is AgentEvent.ToolCall -> {
-                                    sb.append("\n\n[tool] ${ev.tool}(${ev.input})")
+                                    sb.append("\n[tool] ${ev.tool}(${ev.input})")
                                     output.text = sb.toString()
                                 }
                                 is AgentEvent.Observation -> {
                                     sb.append("\n[obs] ${ev.output.take(240)}")
+                                    output.text = sb.toString()
+                                }
+                                is AgentEvent.Verification -> {
+                                    sb.append("\n[verify] ${ev.tool}: " +
+                                        if (ev.passed) "passed" else "failed")
                                     output.text = sb.toString()
                                 }
                                 is AgentEvent.Final -> {
@@ -146,6 +186,13 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    private fun hasNetwork(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val network = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     override fun onDestroy() {
