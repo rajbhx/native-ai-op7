@@ -16,7 +16,7 @@ class ModelRegistry(private val catalogFile: File? = null) {
 
     /** Epoch ms of the last successful discovery refresh (0 = never). */
     var lastRefreshMs: Long = 0
-        private set
+        internal set
 
     fun register(provider: ModelProvider) {
         providers[provider.descriptor.id] = provider
