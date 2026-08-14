@@ -1099,9 +1099,9 @@ private fun modelMetadata(d: ModelDescriptor): AnnotatedString {
     fun meta(label: String, text: String, isKnown: Boolean): AnnotatedString {
         val base = AnnotatedString.Builder()
         base.append("$label ")
-        base.withStyle(SpanStyle(color = if (isKnown) confirmed else unknown)) {
-            append(text)
-        }
+        base.pushStyle(SpanStyle(color = if (isKnown) confirmed else unknown))
+        base.append(text)
+        base.pop()
         base.append("  ")
         return base.toAnnotatedString()
     }
@@ -1132,7 +1132,7 @@ private fun ProviderPill(text: String, color: Color = OpTextSecondary) {
         fontSize = 10.sp,
         modifier = Modifier
             .padding(start = 6.dp)
-            .background(if (red) OpRed else OpCard, RoundedCornerShape(12.dp))
+            .background(color.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
             .padding(horizontal = 8.dp, vertical = 2.dp),
     )
 }
