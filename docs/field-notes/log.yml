@@ -79,3 +79,8 @@ sections:
         cause: "androidx.activity.compose.setContent is a ComponentActivity extension; activity extended plain android.app.Activity"
         solution: "extend androidx.activity.ComponentActivity"
         tags: [compose, kotlin, activity]
+      - id: A16
+        problem: "memory retrieval ranked by hand-rolled linear recency, not the spec's BM25 × exponential decay"
+        cause: "Phase 2 scoring predated the math spec (score = utility*0.5 + recency*0.3 + success*0.2)"
+        solution: "ftsCandidates selects bm25(experiences_fts) AS bm25_rank; score = -rank * exp(-0.05*ageDays) + small tiebreaks; decay SQL lambda 0.02 -> 0.05"
+        tags: [sqlite, fts5, ranking, math]
