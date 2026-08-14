@@ -1,3 +1,36 @@
 # native-ai-op7 field-notes journal — machine-readable source of truth.
 # The playbook sync (rajbhx/op7-special-build-playbook) consumes this.
-sections: []
+sections:
+  - id: A
+    title: CI & build pipeline
+    entries:
+      - id: A1
+        problem: "llama.cpp submodule tag checkout fails in a shallow clone ('origin/b10428 is not a commit')"
+        cause: "--depth 1 --branch <tag> fetches only the default branch, so release tags are absent"
+        solution: "submodule add shallow, then fetch --depth 1 origin tag b10428 + checkout + git add the gitlink"
+        tags: [submodule, llama.cpp, git]
+      - id: A2
+        problem: "'E: Unable to locate package shaderc' on the Ubuntu 24.04 runner"
+        cause: "shaderc was restructured in noble; llama.cpp's own CI uses glslc + spirv-headers"
+        solution: "apt-get install -y glslc libvulkan-dev spirv-headers"
+        tags: [vulkan, github-actions, llama.cpp]
+      - id: A3
+        problem: "'GGML_CPU_ALL_VARIANTS requires GGML_BACKEND_DL' at CMake configure"
+        cause: "llama.cpp gates ALL_VARIANTS behind dynamic backend loading (ggml/src/CMakeLists.txt:373)"
+        solution: "set GGML_BACKEND_DL=ON together with GGML_CPU_ALL_VARIANTS=ON (mirrors llama.cpp build-android.yml)"
+        tags: [cmake, llama.cpp, github-actions]
+      - id: A4
+        problem: "'Inconsistent JVM-target compatibility (1.8 vs 17)' fails compileDebugKotlin"
+        cause: "AGP defaults Java target 1.8 while Kotlin jvmTarget defaulted to 17"
+        solution: "compileOptions VERSION_17 + kotlinOptions { jvmTarget = \"17\" } inside android {}"
+        tags: [gradle, kotlin, jvm]
+      - id: A5
+        problem: "'Unresolved reference ... BaseAppModuleExtension.kotlinOptions' in build.gradle.kts"
+        cause: "kotlinOptions used at top level instead of scoped inside the android {} extension"
+        solution: "move the block inside android {}"
+        tags: [gradle, kotlin]
+      - id: A6
+        problem: "'no matching function for call to llama_memory_clear' at b10428"
+        cause: "KV-cache API refactor — memory ops take a llama_memory_t handle, not the context"
+        solution: "llama_memory_clear(llama_get_memory(g_ctx), false) with null guard"
+        tags: [llama.cpp, api, kv-cache]
