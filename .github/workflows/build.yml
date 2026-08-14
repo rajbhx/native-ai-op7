@@ -29,10 +29,10 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
-      - name: Install Vulkan toolchain (headers + glslc for GGML_VULKAN)
+      - name: Install Vulkan toolchain (host glslc + headers for GGML_VULKAN, Phase 7)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvulkan-dev shaderc
+          sudo apt-get install -y glslc libvulkan-dev spirv-headers
 
       - uses: gradle/actions/setup-gradle@v4
 

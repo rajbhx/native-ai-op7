@@ -4,10 +4,14 @@ project(nativeai LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# llama.cpp (submodule) — Vulkan GPU offload + OpenMP.
-set(GGML_VULKAN ON CACHE BOOL "Vulkan backend" FORCE)
-set(GGML_OPENMP ON CACHE BOOL "OpenMP" FORCE)
+# llama.cpp (submodule, pinned b10428). Baseline mirrors llama.cpp's own
+# Android CI (build-android.yml): CPU-only with runtime dispatch.
+# Vulkan offload (Adreno 640) is a Phase 7 measured optimization — the spec
+# forbids claiming hardware acceleration before verifying it.
+set(GGML_VULKAN OFF CACHE BOOL "Vulkan backend (Phase 7)" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "OpenMP" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "no host -march" FORCE)
+set(GGML_CPU_ALL_VARIANTS ON CACHE BOOL "runtime CPU dispatch (spec: detect, don't hardcode)" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "no examples" FORCE)
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "no tests" FORCE)
 set(LLAMA_BUILD_TOOLS    OFF CACHE BOOL "no tools" FORCE)
@@ -17,12 +21,9 @@ add_subdirectory(
     ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp
     llama.cpp)
 
-# Snapdragon 855 (arm64-v8a): Kryo 485 gold/prime core tuning.
-# Phase 1 replaces this hardcoded block with capability detection
-# (GENERIC_ARM64 / SNAPDRAGON_855 / DEBUG / RELEASE / BENCHMARK profiles).
-if(ANDROID_ABI STREQUAL "arm64-v8a")
-    add_compile_options(-march=armv8.2-a+dotprod+fp16 -O3 -flto)
-endif()
+# No hardcoded -march/-O3/-flto: GGML_CPU_ALL_VARIANTS dispatches per-CPU.
+# A SNAPDRAGON_855 profile may be added in Phase 7 after benchmarking proves
+# it (spec rule: never blind-compile flags).
 
 add_library(native-lib SHARED native-lib.cpp)
 target_link_libraries(native-lib PRIVATE llama)
