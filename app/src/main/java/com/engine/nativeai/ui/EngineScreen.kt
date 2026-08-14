@@ -1,8 +1,11 @@
 package com.engine.nativeai.ui
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -30,6 +33,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,8 +50,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.engine.nativeai.AgentEvent
 import com.engine.nativeai.CalculatorTool
+import com.engine.nativeai.EngineForegroundService
 import com.engine.nativeai.EngineConfig
 import com.engine.nativeai.FileSearchTool
 import com.engine.nativeai.FinalAnswerTool
@@ -87,7 +94,21 @@ fun EngineScreen(engine: NativeEngine, registry: ModelRegistry) {
     var prompt by remember { mutableStateOf("") }
     var output by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
+    var serviceOn by remember { mutableStateOf(false) }
     var selectedMode by remember { mutableStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                context as android.app.Activity,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                100,
+            )
+        }
+    }
 
     val modes = listOf("Auto", "Free-First", "Offline")
     val routingModes = listOf(RoutingMode.HYBRID, RoutingMode.FREE_FIRST, RoutingMode.OFFLINE_ONLY)
@@ -194,6 +215,26 @@ fun EngineScreen(engine: NativeEngine, registry: ModelRegistry) {
             }
         }
 
+        Spacer(Modifier.height(8.dp))
+        PillButton(
+            if (serviceOn) "Stop service" else "Start service",
+            Modifier.fillMaxWidth(),
+            primary = serviceOn,
+            enabled = !running,
+        ) {
+            val next = !serviceOn
+            try {
+                if (next) {
+                    EngineForegroundService.start(context)
+                } else {
+                    EngineForegroundService.stop(context)
+                }
+                serviceOn = next
+            } catch (e: Exception) {
+                status = "service failed: ${e.message}"
+            }
+        }
+
         Spacer(Modifier.height(18.dp))
         Text("MODEL HUB", color = OpText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
@@ -274,6 +315,7 @@ private fun runAgent(
             tools = tools,
             networkAvailable = hasNetwork(context),
         )
+        val sessionId = memory.startSession("agent: ${prompt.take(60)}")
         try {
             val sb = StringBuilder()
             var done = false
@@ -316,6 +358,7 @@ private fun runAgent(
         } catch (e: Exception) {
             setStatus("agent failed: ${e.message}")
         } finally {
+            memory.endSession(sessionId)
             setRunning(false)
         }
     }
