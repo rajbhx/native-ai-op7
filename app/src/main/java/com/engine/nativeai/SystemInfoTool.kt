@@ -8,6 +8,9 @@ class SystemInfoTool(
     override val description =
         "Report engine backend, memory stats and local memory counts. Input: ignored."
 
+    override val permission: ToolPermission
+        get() = ToolPermission.READ_ONLY
+
     override suspend fun execute(input: String): ToolOutput {
         val backend = engine.backendInfo()
         val stats = engine.memoryStats()

@@ -5,6 +5,9 @@ class MemorySearchTool(private val memory: MemoryDatabase) : AgentTool {
     override val description =
         "Search the local memory of past experiences and facts. Input: a short query."
 
+    override val permission: ToolPermission
+        get() = ToolPermission.READ_ONLY
+
     override suspend fun execute(input: String): ToolOutput {
         val context = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             memory.searchContext(input, topK = 3)

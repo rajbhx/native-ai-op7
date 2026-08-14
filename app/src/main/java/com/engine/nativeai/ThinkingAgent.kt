@@ -140,7 +140,8 @@ class ThinkingAgent(
             observations.add("${action.name}: ${result.output.take(400)}")
             state = AgentState.OBSERVING
             emit(AgentEvent.Observation(action.name, result.output))
-            emit(AgentEvent.Verification(action.name, result.ok))
+            val verification = Verifier.verifyTool(result.output, result.ok, action.name)
+            emit(AgentEvent.Verification(action.name, verification.passed))
 
             if (action.name == "final_answer") {
                 state = AgentState.FINAL

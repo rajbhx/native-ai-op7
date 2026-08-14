@@ -6,6 +6,9 @@ class ModelInfoTool(private val registry: ModelRegistry) : AgentTool {
     override val description =
         "List available models, providers, cost tiers and capabilities. Input: ignored."
 
+    override val permission: ToolPermission
+        get() = ToolPermission.READ_ONLY
+
     override suspend fun execute(input: String): ToolOutput {
         val lines = registry.list().map { d ->
             "${d.id} | ${d.provider} | ${d.kind} | ${d.costTier} | ctx=${d.contextLength} | " +

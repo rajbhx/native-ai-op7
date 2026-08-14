@@ -11,6 +11,7 @@ import kotlinx.coroutines.withTimeout
 class ToolExecutor(
     private val registry: ToolRegistry,
     private val memory: MemoryDatabase? = null,
+    private val permissionManager: PermissionManager = PermissionManager(),
     private val maxInputLength: Int = 500,
     private val maxOutputLength: Int = 2000,
     private val timeoutMs: Long = 15_000,
@@ -18,6 +19,10 @@ class ToolExecutor(
     suspend fun execute(name: String, input: String): ToolOutput {
         val tool = registry[name]
             ?: return ToolOutput(name, "", false, "unknown tool: $name")
+        if (!permissionManager.canExecute(tool.permission)) {
+            logTool(name, input, "denied", false)
+            return ToolOutput(name, "", false, permissionManager.denialReason(name, tool.permission))
+        }
         if (input.length > maxInputLength) {
             logTool(name, input, "input too long", false)
             return ToolOutput(name, "", false, "input too long (${input.length} chars)")
@@ -41,6 +46,6 @@ class ToolExecutor(
     }
 
     private fun logTool(name: String, input: String, output: String, ok: Boolean) {
-        memory?.storeToolOutput(name, input.hashCode().toString(), output.take(500), ok)
+        memory?.storeToolResult(name, input.hashCode().toString(), output.take(500), ok)
     }
 }

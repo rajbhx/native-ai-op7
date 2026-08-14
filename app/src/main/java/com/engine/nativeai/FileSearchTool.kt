@@ -10,6 +10,9 @@ class FileSearchTool(private val rootDir: File, private val maxDepth: Int = 3) :
     override val description =
         "Find a file by name inside the app's private storage. Input: a filename or fragment."
 
+    override val permission: ToolPermission
+        get() = ToolPermission.READ_ONLY
+
     override suspend fun execute(input: String): ToolOutput = withContext(Dispatchers.IO) {
         val query = input.trim().lowercase()
         if (query.isEmpty()) {

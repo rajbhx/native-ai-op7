@@ -13,5 +13,7 @@ data class ToolOutput(
 interface AgentTool {
     val name: String
     val description: String
+    val permission: ToolPermission
+        get() = ToolPermission.SAFE
     suspend fun execute(input: String): ToolOutput
 }
