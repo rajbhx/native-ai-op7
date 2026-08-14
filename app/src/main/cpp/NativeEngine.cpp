@@ -31,6 +31,17 @@ bool ends_with(const std::string& s, const std::string& suffix) {
            s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
+void log_to_logcat(ggml_log_level level, const char* text, void* /*user_data*/) {
+    if (text == nullptr) {
+        return;
+    }
+    const int prio = level == GGML_LOG_LEVEL_ERROR ? ANDROID_LOG_ERROR
+                     : level == GGML_LOG_LEVEL_WARN  ? ANDROID_LOG_WARN
+                     : level == GGML_LOG_LEVEL_DEBUG ? ANDROID_LOG_DEBUG
+                                                     : ANDROID_LOG_INFO;
+    __android_log_write(prio, "llama", text);
+}
+
 }  // namespace
 
 NativeEngine::~NativeEngine() {
@@ -44,12 +55,16 @@ bool NativeEngine::init(const Config& config) {
     config_ = config;
     cancel_.store(false);
 
+    llama_log_set(log_to_logcat, nullptr);
     llama_backend_init();
 
     llama_model_params mparams = llama_model_default_params();
     mparams.n_gpu_layers = config_.gpu_layers;
     model_ = llama_model_load_from_file(config_.model_path.c_str(), mparams);
     if (model_ == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, "NativeEngineJNI",
+                            "nativeInit failed: model load returned null (%s)",
+                            config_.model_path.c_str());
         return false;
     }
     vocab_ = llama_model_get_vocab(model_);
@@ -63,6 +78,8 @@ bool NativeEngine::init(const Config& config) {
     if (ctx_ == nullptr && type_k_ == GGML_TYPE_Q8_0) {
         // Spec rule: never silently claim an unsupported KV type. Fall back
         // to backend defaults and keep going.
+        __android_log_print(ANDROID_LOG_WARN, "NativeEngineJNI",
+                            "Q8_0 KV cache rejected by this model; falling back to backend defaults");
         cparams.type_k = llama_context_default_params().type_k;
         cparams.type_v = llama_context_default_params().type_v;
         ctx_ = llama_init_from_model(model_, cparams);
@@ -72,6 +89,9 @@ bool NativeEngine::init(const Config& config) {
         }
     }
     if (ctx_ == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, "NativeEngineJNI",
+                            "nativeInit failed: context create returned null (n_ctx=%d, threads=%d)",
+                            cparams.n_ctx, cparams.n_threads);
         llama_model_free(model_);
         model_ = nullptr;
         vocab_ = nullptr;
