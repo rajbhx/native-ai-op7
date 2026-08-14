@@ -27,4 +27,5 @@ endif()
 add_library(native-lib SHARED native-lib.cpp)
 target_link_libraries(native-lib PRIVATE llama)
 target_include_directories(native-lib PRIVATE
-    ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp/include)
+    ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp/include
+    ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp/ggml/include)
