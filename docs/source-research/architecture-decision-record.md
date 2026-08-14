@@ -89,3 +89,19 @@ only, free infra only, GitHub Actions builds, 1.5 GB AI memory ceiling).
   battery) -> optional LoRA; if the envelope doesn't fit, DO NOT TRAIN —
   preserve the dataset for external training.
 - **Consequences**: training is experimental and gated; never automatic.
+
+## ADR-007 — LiteRT / LiteRT-LM parked as reference, not integrated
+- **Context**: user research pass; LiteRT (ex-TFLite) and LiteRT-LM claim
+  GPU/NPU LLM acceleration, tool use, and on-device LoRA. Our core is
+  llama.cpp + GGUF (ADR-001), which LiteRT cannot run (`.tflite`/`.litertlm`
+  only, no GGUF path).
+- **Decision**: do not integrate now. Recorded as reference in
+  `docs/source-research/litert-lm.md`. Revisit only on the trigger
+  conditions there: (1) memory vector embeddings via a small TFLite embedder,
+  (2) a benchmark on this exact OP7 beating llama.cpp within the 1.5 GB gate,
+  (3) Phase 9 LoRA evaluation. Any integration must go behind the
+  `ModelProvider` interface (ADR-004), never into the AgentKernel.
+- **Consequences**: no new runtime dependency today; the llama.cpp core stays
+  the single local backend until a measured win exists. Upstream moves fast
+  (6-8 week cadence, LiteRT-LM v0.16.0 with C API prebuilts) — re-verify
+  minSdk/Android 10 compatibility and model sizes before any future use.

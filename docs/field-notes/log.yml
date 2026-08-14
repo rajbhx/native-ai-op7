@@ -114,3 +114,8 @@ sections:
         cause: "health() hard-failed on blank key; Zen anonymous billing source is actually supported (per-IP rate-limited)"
         solution: "health() treats anonymous as healthy; omit Authorization when key blank; 429 -> actionable message; UI shows amber 'Free · anonymous (rate-limited)' and dialog clarifies keys only raise the quota"
         tags: [zen, api-key, free-tier, anonymous, rate-limit]
+      - id: A23
+        problem: "evaluate LiteRT/LiteRT-LM as a faster local inference backend for OP7"
+        cause: "LiteRT-LM (Google AI Edge, ex-TFLite) advertises GPU/NPU LLM acceleration, tool use, on-device LoRA; local 1B Q4 is ~1.8 tok/s (contended)"
+        solution: "audited upstream (v0.16.0); parked as reference only (ADR-007 + docs/source-research/litert-lm.md) because runtime is .tflite/.litertlm with no GGUF path — replacing llama.cpp needs a new export pipeline + second runtime and risks the 1.5 GB gate. Revisit on triggers: memory embedder via TFLite, same-device benchmark win, Phase 9 LoRA"
+        tags: [litert, tflite, inference, adr, reference]
