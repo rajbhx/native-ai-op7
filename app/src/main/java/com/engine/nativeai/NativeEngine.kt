@@ -29,7 +29,7 @@ class NativeEngine : AutoCloseable {
 
     suspend fun generate(prompt: String, maxTokens: Int = 128): InferenceResult =
         withContext(Dispatchers.IO) {
-        check(loaded) { "engine not initialized" }
+            check(loaded) { "engine not initialized" }
             val json = JSONObject(nativeGenerate(prompt, maxTokens))
             InferenceResult(
                 text = json.optString("text"),

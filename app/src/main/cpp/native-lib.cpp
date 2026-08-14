@@ -123,7 +123,10 @@ Java_com_engine_nativeai_NativeEngine_nativeGenerate(JNIEnv* env, jobject,
   }
 
   g_cancel = false;
-  llama_memory_clear(g_ctx);  // single-turn baseline; slots come in Phase 1
+  // Single-turn baseline; slots/multi-sequence come in Phase 1.
+  if (llama_memory_t mem = llama_get_memory(g_ctx); mem != nullptr) {
+    llama_memory_clear(mem, /*data=*/false);
+  }
 
   const llama_vocab* vocab = llama_model_get_vocab(g_model);
   const llama_token eos = llama_vocab_eos(vocab);
