@@ -29,3 +29,10 @@ data class ToolResult(
     val ok: Boolean,
     val timestamp: Long,
 )
+
+data class SessionInfo(
+    val id: Long,
+    val startedAt: Long,
+    val endedAt: Long?,
+    val meta: String,
+)

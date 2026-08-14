@@ -196,6 +196,55 @@ class MemoryDatabase(context: Context) :
     }
 
     @Synchronized
+    fun startSession(meta: String = ""): Long =
+        writableDatabase.insertOrThrow(
+            "sessions", null,
+            ContentValues().apply {
+                put("started_at", System.currentTimeMillis())
+                put("session_meta", meta)
+            },
+        )
+
+    @Synchronized
+    fun endSession(id: Long) {
+        writableDatabase.execSQL(
+            "UPDATE sessions SET ended_at = ? WHERE id = ?",
+            arrayOf<Any>(System.currentTimeMillis(), id),
+        )
+    }
+
+    fun recentSessions(limit: Int = 10): List<SessionInfo> =
+        readableDatabase.rawQuery(
+            "SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?",
+            arrayOf(limit.toString()),
+        ).use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        SessionInfo(
+                            id = c.getLong(c.getColumnIndexOrThrow("id")),
+                            startedAt = c.getLong(c.getColumnIndexOrThrow("started_at")),
+                            endedAt = if (c.isNull(c.getColumnIndexOrThrow("ended_at"))) {
+                                null
+                            } else {
+                                c.getLong(c.getColumnIndexOrThrow("ended_at"))
+                            },
+                            meta = c.getString(c.getColumnIndexOrThrow("session_meta")),
+                        ),
+                    )
+                }
+            }
+        }
+
+    /** Verified, successful experiences = training candidates (phase 4 spec). */
+    fun verifiedExperiences(limit: Int = 500): List<Experience> =
+        readableDatabase.rawQuery(
+            "SELECT * FROM experiences WHERE success = 1 AND verified = 1 " +
+                "ORDER BY timestamp DESC LIMIT ?",
+            arrayOf(limit.toString()),
+        ).use { c -> buildList { while (c.moveToNext()) add(c.toExperience()) } }
+
+    @Synchronized
     fun storeToolResult(toolName: String, inputHash: String, outputSummary: String, ok: Boolean): Long =
         writableDatabase.insertOrThrow(
             "tool_results", null,
