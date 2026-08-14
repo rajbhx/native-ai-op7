@@ -1,13 +1,19 @@
 package com.engine.nativeai
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
+/** Receives one decoded text piece per sampled token (native thread). */
+interface TokenCallback {
+    fun onToken(token: String)
+}
+
 /**
  * JNI bridge to llama.cpp (pinned submodule commit b10428). All native calls
- * run on Dispatchers.IO. Draft baseline: streaming (Flow<String>) and
- * ModelManager arrive in Phase 1 proper (docs/GOLD-STANDARD-SPEC.md).
+ * run on Dispatchers.IO. Streaming (Flow<String>) is part of Phase 1.
  */
 class NativeEngine : AutoCloseable {
     private var loaded = false
@@ -37,6 +43,36 @@ class NativeEngine : AutoCloseable {
                 tokens = json.optInt("tokens"),
             )
         }
+
+    /**
+     * Streams generated tokens as they are sampled. Cancelling the collector
+     * requests native cancellation; generation stops at the next token.
+     */
+    fun generateStream(
+        prompt: String,
+        config: GenerationConfig = GenerationConfig(),
+    ): Flow<String> = callbackFlow {
+        val callback = object : TokenCallback {
+            override fun onToken(token: String) {
+                trySend(token)
+            }
+        }
+        invokeOnClose { nativeCancel() }
+        withContext(Dispatchers.IO) {
+            nativeGenerateStream(
+                prompt,
+                config.maxTokens,
+                config.temperature,
+                config.topP,
+                config.topK,
+                config.repetitionPenalty,
+                config.penaltyLastN,
+                config.stopSequences.toTypedArray(),
+                callback,
+            )
+        }
+        close()
+    }
 
     /** Requests cancellation; the next sampled token stops generation. */
     fun cancel() {
@@ -79,6 +115,17 @@ class NativeEngine : AutoCloseable {
 
     private external fun nativeInit(modelPath: String, threads: Int, gpuLayers: Int, nCtx: Int): Boolean
     private external fun nativeGenerate(prompt: String, maxTokens: Int): String
+    private external fun nativeGenerateStream(
+        prompt: String,
+        maxTokens: Int,
+        temperature: Float,
+        topP: Float,
+        topK: Int,
+        repeatPenalty: Float,
+        penaltyLastN: Int,
+        stopSequences: Array<String>,
+        callback: TokenCallback,
+    )
     private external fun nativeCancel()
     private external fun nativeGetMemoryStats(): String
     private external fun nativeGetBackendInfo(): String

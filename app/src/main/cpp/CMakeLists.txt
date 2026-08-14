@@ -26,7 +26,10 @@ add_subdirectory(
 # A SNAPDRAGON_855 profile may be added in Phase 7 after benchmarking proves
 # it (spec rule: never blind-compile flags).
 
-add_library(native-lib SHARED native-lib.cpp)
+add_library(native-lib SHARED
+    native-lib.cpp
+    NativeEngine.cpp
+    MemoryMonitor.cpp)
 target_link_libraries(native-lib PRIVATE llama)
 target_include_directories(native-lib PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp/include

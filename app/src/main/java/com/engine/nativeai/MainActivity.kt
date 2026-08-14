@@ -5,7 +5,10 @@ import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
-import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -15,6 +18,7 @@ import java.io.File
  */
 class MainActivity : Activity() {
     private val engine = NativeEngine()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var loaded = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,7 +36,7 @@ class MainActivity : Activity() {
         status.text = "Engine library loaded. Put a GGUF at:\n${modelFile.absolutePath}"
 
         loadBtn.setOnClickListener {
-            lifecycleScope.launch {
+            scope.launch {
                 loadBtn.isEnabled = false
                 status.text = if (!modelFile.exists()) {
                     "Model not found:\n${modelFile.absolutePath}\nCopy a GGUF there, then retry."
@@ -50,7 +54,7 @@ class MainActivity : Activity() {
         }
 
         genBtn.setOnClickListener {
-            lifecycleScope.launch {
+            scope.launch {
                 if (!loaded) {
                     status.text = "Load a model first."
                     return@launch
@@ -59,9 +63,12 @@ class MainActivity : Activity() {
                 output.text = ""
                 status.text = "generating…"
                 try {
-                    val r = engine.generate(prompt.text.toString(), maxTokens = 64)
-                    output.text = if (r.cancelled) "${r.text}\n[cancelled]" else r.text
-                    status.text = "generated ${r.tokens} tokens"
+                    val sb = StringBuilder()
+                    engine.generateStream(
+                        prompt.text.toString(),
+                        GenerationConfig(maxTokens = 64),
+                    ).collect { sb.append(it); output.text = sb.toString() }
+                    status.text = "done (${sb.length} chars)"
                 } catch (e: Exception) {
                     status.text = "generate failed: ${e.message}"
                 }
@@ -70,7 +77,7 @@ class MainActivity : Activity() {
         }
 
         statsBtn.setOnClickListener {
-            lifecycleScope.launch {
+            scope.launch {
                 if (!loaded) {
                     status.text = "Load a model first."
                     return@launch
@@ -88,6 +95,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        scope.cancel()
         engine.close()
         super.onDestroy()
     }

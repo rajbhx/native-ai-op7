@@ -1,56 +1,25 @@
-// Phase 1 JNI bridge — DRAFT baseline.
-// Audited against the pinned llama.cpp submodule commit (b10428). Uses only
-// functions that exist in that exact checkout:
-//   llama_init_from_model (llama_new_context_with_model is deprecated here),
-//   llama_vocab_eos (llama_token_eos is deprecated),
-//   llama_memory_clear (llama_kv_cache_clear was renamed),
-//   llama_sampler_init_greedy / llama_sampler_sample.
-// mmap is automatic in b10428 (llama_model_params has no use_mmap field).
-// Streaming (Flow<String>), MemoryMonitor and ModelManager arrive in Phase 1
-// proper — see docs/GOLD-STANDARD-SPEC.md.
+// JNI glue — all engine logic lives in NativeEngine (RAII).
 #include <jni.h>
-#include <atomic>
-#include <cstdint>
-#include <cstdio>
+
 #include <string>
 #include <vector>
 
-#include "llama.h"
+#include "NativeEngine.hpp"
 
 namespace {
 
-llama_model* g_model = nullptr;
-llama_context* g_ctx = nullptr;
-std::atomic<bool> g_cancel{false};
-int32_t g_threads = 4;
-int32_t g_gpu_layers = 0;
-int32_t g_n_ctx = 2048;
-enum ggml_type g_type_k = GGML_TYPE_Q8_0;
-enum ggml_type g_type_v = GGML_TYPE_Q8_0;
+NativeEngine g_engine;
 
-const char* kv_type_name(enum ggml_type t) {
-  switch (t) {
-    case GGML_TYPE_Q8_0: return "Q8_0";
-    case GGML_TYPE_F16: return "F16";
-    default: return "default";
-  }
-}
-
-// Minimal JSON escaping for the small payloads this bridge returns.
-std::string json_escape(const std::string& s) {
-  std::string out;
-  out.reserve(s.size() + 8);
-  for (char c : s) {
-    switch (c) {
-      case '"': out += "\\\""; break;
-      case '\\': out += "\\\\"; break;
-      case '\n': out += "\\n"; break;
-      case '\r': out += "\\r"; break;
-      case '\t': out += "\\t"; break;
-      default: out += c;
+std::string jstring_to_utf8(JNIEnv* env, jstring s) {
+    if (s == nullptr) {
+        return "";
     }
-  }
-  return out;
+    const char* c = env->GetStringUTFChars(s, nullptr);
+    std::string out(c != nullptr ? c : "");
+    if (c != nullptr) {
+        env->ReleaseStringUTFChars(s, c);
+    }
+    return out;
 }
 
 }  // namespace
@@ -60,177 +29,85 @@ extern "C" {
 JNIEXPORT jboolean JNICALL
 Java_com_engine_nativeai_NativeEngine_nativeInit(JNIEnv* env, jobject,
                                                  jstring model_path,
-                                                 jint threads,
-                                                 jint gpu_layers,
+                                                 jint threads, jint gpu_layers,
                                                  jint n_ctx) {
-  const char* path = env->GetStringUTFChars(model_path, nullptr);
-  if (path == nullptr) {
-    return JNI_FALSE;
-  }
-
-  llama_backend_init();
-
-  llama_model_params mparams = llama_model_default_params();
-  // Conservative default: no GPU offload until Phase 1 benchmarks prove the
-  // right layer count for the Adreno 640 within the 1.5 GB budget.
-  mparams.n_gpu_layers = gpu_layers;
-  g_model = llama_load_model_from_file(path, mparams);
-  env->ReleaseStringUTFChars(model_path, path);
-  if (g_model == nullptr) {
-    return JNI_FALSE;
-  }
-
-  llama_context_params cparams = llama_context_default_params();
-  cparams.n_ctx = n_ctx > 0 ? n_ctx : 2048;
-  cparams.type_k = g_type_k;  // Q8_0 KV-cache quantization (experimental)
-  cparams.type_v = g_type_v;
-  cparams.n_threads = threads > 0 ? threads : 4;
-  g_ctx = llama_init_from_model(g_model, cparams);
-  if (g_ctx == nullptr && g_type_k == GGML_TYPE_Q8_0) {
-    // Spec rule: never silently claim an unsupported KV type. Fall back and
-    // keep going with the backend defaults.
-    cparams.type_k = llama_context_default_params().type_k;
-    cparams.type_v = llama_context_default_params().type_v;
-    g_ctx = llama_init_from_model(g_model, cparams);
-    if (g_ctx != nullptr) {
-      g_type_k = cparams.type_k;
-      g_type_v = cparams.type_v;
-    }
-  }
-  if (g_ctx == nullptr) {
-    llama_free_model(g_model);
-    g_model = nullptr;
-    return JNI_FALSE;
-  }
-  g_threads = cparams.n_threads;
-  g_gpu_layers = gpu_layers;
-  g_n_ctx = static_cast<int32_t>(llama_n_ctx(g_ctx));
-  return JNI_TRUE;
+    NativeEngine::Config cfg;
+    cfg.model_path = jstring_to_utf8(env, model_path);
+    cfg.threads = threads > 0 ? threads : 4;
+    cfg.gpu_layers = gpu_layers;
+    cfg.n_ctx = n_ctx > 0 ? n_ctx : 2048;
+    return g_engine.init(cfg) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jstring JNICALL
 Java_com_engine_nativeai_NativeEngine_nativeGenerate(JNIEnv* env, jobject,
                                                      jstring prompt,
                                                      jint max_tokens) {
-  if (g_model == nullptr || g_ctx == nullptr) {
-    return env->NewStringUTF("{\"text\":\"\",\"cancelled\":false,\"tokens\":0}");
-  }
+    const std::string json =
+        g_engine.generate(jstring_to_utf8(env, prompt), max_tokens);
+    return env->NewStringUTF(json.c_str());
+}
 
-  const char* text = env->GetStringUTFChars(prompt, nullptr);
-  const std::string prompt_str(text == nullptr ? "" : text);
-  if (text != nullptr) {
-    env->ReleaseStringUTFChars(prompt, text);
-  }
-
-  g_cancel = false;
-  // Single-turn baseline; slots/multi-sequence come in Phase 1.
-  if (llama_memory_t mem = llama_get_memory(g_ctx); mem != nullptr) {
-    llama_memory_clear(mem, /*data=*/false);
-  }
-
-  const llama_vocab* vocab = llama_model_get_vocab(g_model);
-  const llama_token eos = llama_vocab_eos(vocab);
-
-  std::vector<llama_token> prompt_tokens(2048);
-  const int32_t n_prompt = llama_tokenize(
-      vocab, prompt_str.c_str(), static_cast<int32_t>(prompt_str.size()),
-      prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size()),
-      /*add_special=*/true, /*parse_special=*/false);
-  if (n_prompt < 0) {
-    return env->NewStringUTF("{\"text\":\"\",\"cancelled\":false,\"tokens\":0}");
-  }
-  prompt_tokens.resize(n_prompt);
-
-  llama_batch batch = llama_batch_get_one(prompt_tokens.data(), n_prompt);
-  if (llama_decode(g_ctx, batch) != 0) {
-    return env->NewStringUTF("{\"text\":\"\",\"cancelled\":false,\"tokens\":0}");
-  }
-
-  llama_sampler* sampler = llama_sampler_init_greedy();
-  std::string out;
-  int32_t generated = 0;
-  const int32_t limit = max_tokens > 0 ? max_tokens : 128;
-  char piece[64];
-  while (generated < limit && !g_cancel.load()) {
-    const llama_token id = llama_sampler_sample(sampler, g_ctx, -1);
-    if (id == eos) {
-      break;
+JNIEXPORT void JNICALL
+Java_com_engine_nativeai_NativeEngine_nativeGenerateStream(
+    JNIEnv* env, jobject, jstring prompt, jint max_tokens, jfloat temperature,
+    jfloat top_p, jint top_k, jfloat repeat_penalty, jint penalty_last_n,
+    jobjectArray stop_sequences, jobject callback) {
+    NativeEngine::GenerationConfig gc;
+    gc.max_tokens = max_tokens > 0 ? max_tokens : 128;
+    gc.temperature = temperature;
+    gc.top_p = top_p;
+    gc.top_k = top_k;
+    gc.repeat_penalty = repeat_penalty;
+    gc.penalty_last_n = penalty_last_n;
+    if (stop_sequences != nullptr) {
+        const jsize n = env->GetArrayLength(stop_sequences);
+        for (jsize i = 0; i < n; ++i) {
+            jstring s = static_cast<jstring>(env->GetObjectArrayElement(stop_sequences, i));
+            gc.stop_sequences.push_back(jstring_to_utf8(env, s));
+            env->DeleteLocalRef(s);
+        }
     }
-    const int32_t n = llama_token_to_piece(vocab, id, piece, sizeof(piece),
-                                           /*lstrip=*/0, /*special=*/false);
-    if (n > 0) {
-      out.append(piece, static_cast<size_t>(n));
-    }
-    ++generated;
-    llama_token one = id;
-    llama_batch one_batch = llama_batch_get_one(&one, 1);
-    if (llama_decode(g_ctx, one_batch) != 0) {
-      break;
-    }
-  }
-  llama_sampler_free(sampler);
 
-  const bool cancelled = g_cancel.load();
-  std::string result = "{\"text\":\"" + json_escape(out) + "\",\"cancelled\":" +
-                       (cancelled ? "true" : "false") + ",\"tokens\":" +
-                       std::to_string(generated) + "}";
-  return env->NewStringUTF(result.c_str());
+    if (callback == nullptr) {
+        return;
+    }
+    jclass cb_cls = env->GetObjectClass(callback);
+    jmethodID on_token =
+        env->GetMethodID(cb_cls, "onToken", "(Ljava/lang/String;)V");
+    env->DeleteLocalRef(cb_cls);
+    if (on_token == nullptr) {
+        return;  // pending NoSuchMethodError propagates to the caller
+    }
+
+    const std::string prompt_str = jstring_to_utf8(env, prompt);
+    g_engine.generateStream(
+        prompt_str, gc,
+        [env, callback, on_token](const std::string& piece) {
+            jstring js = env->NewStringUTF(piece.c_str());
+            env->CallVoidMethod(callback, on_token, js);
+            env->DeleteLocalRef(js);
+        });
 }
 
 JNIEXPORT void JNICALL
 Java_com_engine_nativeai_NativeEngine_nativeCancel(JNIEnv*, jobject) {
-  g_cancel = true;
+    g_engine.cancel();
 }
 
 JNIEXPORT jstring JNICALL
 Java_com_engine_nativeai_NativeEngine_nativeGetMemoryStats(JNIEnv* env, jobject) {
-  if (g_model == nullptr || g_ctx == nullptr) {
-    return env->NewStringUTF("{}");
-  }
-  char json[256];
-  std::snprintf(json, sizeof(json),
-                "{\"model_bytes\":%llu,\"n_ctx\":%d,\"kv_type_k\":\"%s\","
-                "\"kv_type_v\":\"%s\",\"threads\":%d,\"gpu_layers\":%d,"
-                "\"gpu_offload_supported\":%s}",
-                static_cast<unsigned long long>(llama_model_size(g_model)),
-                g_n_ctx, kv_type_name(g_type_k), kv_type_name(g_type_v),
-                g_threads, g_gpu_layers,
-                llama_supports_gpu_offload() ? "true" : "false");
-  return env->NewStringUTF(json);
+    return env->NewStringUTF(g_engine.memoryStatsJson().c_str());
 }
 
 JNIEXPORT jstring JNICALL
 Java_com_engine_nativeai_NativeEngine_nativeGetBackendInfo(JNIEnv* env, jobject) {
-  if (g_model == nullptr || g_ctx == nullptr) {
-    return env->NewStringUTF("{}");
-  }
-  char json[256];
-  std::snprintf(json, sizeof(json),
-                "{\"backend\":\"ggml%s\",\"n_ctx\":%d,\"type_k\":\"%s\","
-                "\"type_v\":\"%s\",\"threads\":%d,\"gpu_layers\":%d}",
-                llama_supports_gpu_offload() ? "+vulkan" : "",
-                g_n_ctx, kv_type_name(g_type_k), kv_type_name(g_type_v),
-                g_threads, g_gpu_layers);
-  return env->NewStringUTF(json);
+    return env->NewStringUTF(g_engine.backendInfoJson().c_str());
 }
 
 JNIEXPORT void JNICALL
 Java_com_engine_nativeai_NativeEngine_nativeUnload(JNIEnv*, jobject) {
-  g_cancel = true;
-  if (g_ctx != nullptr) {
-    llama_free(g_ctx);
-    g_ctx = nullptr;
-  }
-  if (g_model != nullptr) {
-    llama_free_model(g_model);
-    g_model = nullptr;
-  }
-  llama_backend_free();
-  g_threads = 4;
-  g_gpu_layers = 0;
-  g_n_ctx = 2048;
-  g_type_k = GGML_TYPE_Q8_0;
-  g_type_v = GGML_TYPE_Q8_0;
+    g_engine.unload();
 }
 
 }  // extern "C"
