@@ -12,9 +12,9 @@ object SafeExpr {
     fun evaluate(input: String): Double {
         val tokens = tokenize(input)
         if (tokens.isEmpty()) throw IllegalArgumentException("empty expression")
-        var pos = 0
-        val value = parseExpr(tokens) { pos }
-        if (pos != tokens.size) throw IllegalArgumentException("unexpected token: ${tokens[pos]}")
+        val pos = Ref(0)
+        val value = parseExpr(tokens, pos)
+        if (pos.value != tokens.size) throw IllegalArgumentException("unexpected token: ${tokens[pos.value]}")
         return value
     }
 
