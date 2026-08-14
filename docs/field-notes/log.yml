@@ -104,3 +104,8 @@ sections:
         cause: "OP7 OxygenOS Android 10 SQLite lacks the FTS5 extension; MemoryDatabase.onCreate DDL failed and startSession ran outside try/catch -> uncaught coroutine crash"
         solution: "detect FTS5 availability (try/catch DDL), fall back to bounded LIKE term-hit retrieval; wrap startSession/endSession so memory failure degrades gracefully"
         tags: [sqlite, fts5, memory, crash, oneplus]
+      - id: A21
+        problem: "Agent unusable: persisted remote provider not re-registered after restart; local model required manual pre-load"
+        cause: "providers registered only on picker selection; runAgent early-returned for unloaded local; messages not actionable"
+        solution: "re-register persisted remote at startup; auto-load local GGUF on Agent/Generate; add in-app GGUF downloader (space check, magic verify, tmp+rename) + context selector; industrial UI redesign with real engine-state header"
+        tags: [agent, router, models, download, ui, compose]
