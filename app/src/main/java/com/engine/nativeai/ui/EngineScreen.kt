@@ -116,6 +116,7 @@ fun EngineScreen(
     var showKeyDialog by remember { mutableStateOf(false) }
     var keyProviderId by remember { mutableStateOf<String?>(null) }
     var keyInput by remember { mutableStateOf("") }
+    var threads by remember { mutableStateOf(4) }
 
     LaunchedEffect(Unit) {
         // Refresh the catalog once on first launch (cached metadata is used
@@ -171,6 +172,19 @@ fun EngineScreen(
         )
         Spacer(Modifier.height(10.dp))
 
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Threads", color = OpTextSecondary, fontSize = 11.sp)
+            Spacer(Modifier.width(8.dp))
+            listOf(2, 3, 4, 5, 6).forEach { n ->
+                SegmentedPill(
+                    "$n",
+                    selected = threads == n,
+                    modifier = Modifier.padding(end = 6.dp),
+                ) { threads = n }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+
         Row(Modifier.fillMaxWidth()) {
             PillButton("Load model", Modifier.weight(1f), enabled = !running) {
                 scope.launch {
@@ -178,14 +192,16 @@ fun EngineScreen(
                         "Model not found:\n${modelFile.absolutePath}\nCopy a GGUF there, then retry."
                     } else {
                         try {
+                            if (loaded) engine.close() // re-init honors a new thread count
                             engine.init(
     EngineConfig(
         modelFile.absolutePath,
+        threads = threads,
         nativeLibDir = context.applicationInfo.nativeLibraryDir,
     ),
 )
                             loaded = true
-                            "Model loaded: ${modelFile.name}"
+                            "Model loaded: ${modelFile.name} (threads=$threads)"
                         } catch (e: Exception) {
                             "init failed: ${e.message}"
                         }

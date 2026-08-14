@@ -18,6 +18,8 @@
   tags: [provider, api-key, privacy]
 
 ## Notes (optional)
-- On-device local model: Qwen 0.5B Q4_K_M (491 MB gguf), mmap; stats: model=462 MB, ctx=2048, KV=Q8_0/Q8_0, threads=4, gpu=0, RSS=729 MB — comfortably inside the 1.5 GB budget. Device contended (in use), MemAvailable ~1.7 GB.
+- On-device local model: the 491 MB gguf is actually a Qwen 1B (24 layers, n_embd 896, n_ctx_train 32768), not 0.5B as the filename suggests. mmap; stats: model=462 MB, ctx=2048, KV=Q8_0/Q8_0, threads=4, gpu=0, RSS=729 MB — comfortably inside the 1.5 GB budget. Device contended (in use), MemAvailable ~2.8 GB, cores at max freq (2.42/2.84 GHz).
+- Baseline benchmark (contended, threads=4, 64 tokens): prompt eval 1.2-2.4 s for 3-6 tokens, first_token ~4 ms after prompt eval, generation 1.78-1.82 tok/s. Slow relative to expectations -> thread sweep (2-6) added to UI, re-benchmark when device is free.
+- Thread selector (2-6) added to Model Hub; Load model now close()+init so thread changes apply without app restart.
 - Model catalog discovery works live: 62 models from https://opencode.ai/zen/v1/models, incl. big-pickle, deepseek-v4-flash-free, mimo-v2.5-free, nemotron-3-ultra-free; user-spec ids ling-3.0-flash-free/north-mini-code-free absent at refresh time — proves the list must stay dynamic.
 - CI artifact install route: python3 -m http.server in proot + shizuku curl to /data/local/tmp + pm install -t (SELinux blocks pm from reading /sdcard).
