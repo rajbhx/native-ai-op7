@@ -69,3 +69,13 @@ sections:
         cause: "nullable var reassigned inside a catch while read inside flow lambdas"
         solution: "non-null via ?: run { emit(Error); return@flow }; var stays non-null"
         tags: [kotlin, smart-cast, agent]
+      - id: A14
+        problem: "ld.lld: undefined symbol ggml_threadpool_new / ggml_threadpool_free"
+        cause: "threadpool API lives in the CPU backend (ggml-cpu.c), dlopen'd under GGML_BACKEND_DL=ON — not linkable from native-lib"
+        solution: "pin the calling decode thread before first graph compute; pthreads inherit creator affinity; no direct ggml-cpu link; -llog for logcat"
+        tags: [llama.cpp, affinity, linker]
+      - id: A15
+        problem: "setContent in MainActivity: 'receiver type mismatch'"
+        cause: "androidx.activity.compose.setContent is a ComponentActivity extension; activity extended plain android.app.Activity"
+        solution: "extend androidx.activity.ComponentActivity"
+        tags: [compose, kotlin, activity]
