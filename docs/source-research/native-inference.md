@@ -39,3 +39,13 @@ candidates, dependencies introduced.
 
 ## Verdict (ADR-001/ADR-002)
 Adopt llama.cpp pinned; minimal custom JNI; no other inference engine.
+
+## PocketPal AI (llama.rn usage patterns)
+- **Learn**: gguf download flow guards (verify magic before rename; free-space
+  check via statfs; resume/cancel), llama.rn context params (n_ctx, n_threads,
+  n_gpu_layers, KV type), per-device fallback rules, benchmark harness shape.
+- **Do NOT copy**: the native RN bridge or its bundled llama.cpp build; we keep
+  our pinned b10428 submodule + JNI + Vulkan-optional CMake.
+- **Adapted**: ModelDownloader.kt mirrors the download guards; context/threads
+  remain our native EngineConfig knobs; GPU layers stay 0 until a Vulkan
+  backend is verified on the OP7 (never assume).

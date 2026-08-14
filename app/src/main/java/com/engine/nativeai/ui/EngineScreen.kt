@@ -32,6 +32,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -66,6 +67,8 @@ import com.engine.nativeai.FinalAnswerTool
 import com.engine.nativeai.GenerationConfig
 import com.engine.nativeai.LocalFallbackProvider
 import com.engine.nativeai.MemoryDatabase
+import com.engine.nativeai.ModelDownloader
+import com.engine.nativeai.DownloadResult
 import com.engine.nativeai.MemorySearchTool
 import com.engine.nativeai.ModelCatalog
 import com.engine.nativeai.ModelCostTier
@@ -121,6 +124,12 @@ fun EngineScreen(
     var keyProviderId by remember { mutableStateOf<String?>(null) }
     var keyInput by remember { mutableStateOf("") }
     var threads by remember { mutableStateOf(4) }
+    var contextSize by remember { mutableStateOf(2048) }
+    var showDownloadDialog by remember { mutableStateOf(false) }
+    var downloading by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableStateOf<Float?>(null) }
+    var downloadStatus by remember { mutableStateOf("") }
+    val downloadCancel = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
 
     LaunchedEffect(Unit) {
         // Refresh the catalog once on first launch (cached metadata is used
@@ -178,6 +187,7 @@ fun EngineScreen(
                 EngineConfig(
                     modelFile.absolutePath,
                     threads = threads,
+                    contextSize = contextSize,
                     nativeLibDir = context.applicationInfo.nativeLibraryDir,
                 ),
             )
@@ -305,6 +315,16 @@ fun EngineScreen(
             }
         }
         Text("Recommended: 4 \u00b7 Snapdragon 855 (Kryo 485)", color = OpTextSecondary, fontSize = 10.sp)
+        Spacer(Modifier.height(8.dp))
+        Text("CONTEXT", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            listOf(512, 1024, 2048).forEach { n ->
+                SegmentedPill("$n", selected = contextSize == n, modifier = Modifier.padding(end = 8.dp)) {
+                    contextSize = n
+                }
+            }
+        }
         Spacer(Modifier.height(12.dp))
 
         // ---------------- PRIMARY ACTIONS ----------------
@@ -408,6 +428,12 @@ fun EngineScreen(
                 status = "service failed: ${e.message}"
             }
         }
+        Spacer(Modifier.height(8.dp))
+        PillButton("Download GGUF model", Modifier.fillMaxWidth(), enabled = !running && !downloading) {
+            downloadStatus = ""
+            downloadProgress = null
+            showDownloadDialog = true
+        }
 
         Spacer(Modifier.height(18.dp))
         Text("MODEL HUB", color = OpText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
@@ -508,6 +534,54 @@ fun EngineScreen(
                     status = "API key cleared for ${keyProviderId}"
                 },
                 onDismiss = { showKeyDialog = false },
+            )
+        }
+
+        if (showDownloadDialog) {
+            ModelDownloadDialog(
+                downloading = downloading,
+                progress = downloadProgress,
+                status = downloadStatus,
+                onPick = { url ->
+                    downloadStatus = ""
+                    downloadProgress = null
+                },
+                onDownload = { url ->
+                    scope.launch {
+                        downloading = true
+                        downloadProgress = null
+                        downloadStatus = "connecting\u2026"
+                        val result = ModelDownloader(modelFile).download(
+                            url = url,
+                            onProgress = { done, total ->
+                                downloadProgress = if (total != null && total > 0) {
+                                    (done.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                                } else {
+                                    null
+                                }
+                                downloadStatus = "downloaded ${done / (1024 * 1024)} MB" +
+                                    (total?.let { " / ${it / (1024 * 1024)} MB" } ?: "")
+                            },
+                            cancelled = downloadCancel,
+                        )
+                        downloading = false
+                        when (result) {
+                            is DownloadResult.Success -> {
+                                downloadProgress = 1f
+                                downloadStatus = "saved ${modelFile.name} (${result.bytes / (1024 * 1024)} MB) \u2014 tap Load Model"
+                                status = "Model downloaded: ${modelFile.name} \u2014 tap Load Model"
+                            }
+                            is DownloadResult.Error -> {
+                                downloadStatus = "failed: ${result.message}"
+                                status = "download failed: ${result.message}"
+                            }
+                        }
+                    }
+                },
+                onCancel = { downloadCancel.set(true) },
+                onDismiss = {
+                    if (!downloading) showDownloadDialog = false
+                },
             )
         }
 
@@ -907,3 +981,103 @@ private fun ApiKeyDialog(
         },
     )
 }
+
+
+@Composable
+private fun ModelDownloadDialog(
+    downloading: Boolean,
+    progress: Float?,
+    status: String,
+    onPick: (String) -> Unit,
+    onDownload: (String) -> Unit,
+    onCancel: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var url by remember { mutableStateOf(QUICK_MODELS.first().url) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Download GGUF model", color = OpText) },
+        text = {
+            Column {
+                Text(
+                    "Saves to ${"models/model.gguf"}. Quick picks are verified OP7-sized quantized models.",
+                    color = OpTextSecondary,
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                QUICK_MODELS.forEach { q ->
+                    Text(
+                        q.label,
+                        color = OpRed,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clickable { url = q.url; onPick(q.url) }
+                            .padding(vertical = 4.dp),
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("GGUF URL") },
+                    minLines = 2,
+                    singleLine = false,
+                    enabled = !downloading,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = OpRed,
+                        unfocusedBorderColor = OpDivider,
+                        cursorColor = OpRed,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (downloading) {
+                    Spacer(Modifier.height(10.dp))
+                    LinearProgressIndicator(
+                        progress = { progress ?: 0f },
+                        color = OpRed,
+                        trackColor = OpDivider,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (status.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(status, color = OpTextSecondary, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            if (downloading) {
+                Button(onClick = onCancel, colors = ButtonDefaults.buttonColors(containerColor = OpCard)) {
+                    Text("Cancel")
+                }
+            } else {
+                Button(onClick = { onDownload(url.trim()) }, enabled = url.isNotBlank()) {
+                    Text("Download")
+                }
+            }
+        },
+        dismissButton = {
+            if (!downloading) {
+                Button(onClick = onDismiss) { Text("Close") }
+            }
+        },
+    )
+}
+
+private data class QuickModel(val label: String, val url: String)
+
+private val QUICK_MODELS = listOf(
+    QuickModel(
+        "Qwen2.5-0.5B Q4_K_M \u00b7 ModelScope (~380 MB)",
+        "https://modelscope.cn/models/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/master/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    ),
+    QuickModel(
+        "Qwen2.5-0.5B Q4_K_M \u00b7 HuggingFace (~380 MB)",
+        "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    ),
+    QuickModel(
+        "Qwen2.5-1.5B Q4_K_M \u00b7 ModelScope (~1 GB)",
+        "https://modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/master/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    ),
+)
