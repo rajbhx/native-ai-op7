@@ -109,3 +109,8 @@ sections:
         cause: "providers registered only on picker selection; runAgent early-returned for unloaded local; messages not actionable"
         solution: "re-register persisted remote at startup; auto-load local GGUF on Agent/Generate; add in-app GGUF downloader (space check, magic verify, tmp+rename) + context selector; industrial UI redesign with real engine-state header"
         tags: [agent, router, models, download, ui, compose]
+      - id: A22
+        problem: "UI implied free remote models require an API key"
+        cause: "health() hard-failed on blank key; Zen anonymous billing source is actually supported (per-IP rate-limited)"
+        solution: "health() treats anonymous as healthy; omit Authorization when key blank; 429 -> actionable message; UI shows amber 'Free · anonymous (rate-limited)' and dialog clarifies keys only raise the quota"
+        tags: [zen, api-key, free-tier, anonymous, rate-limit]

@@ -38,7 +38,7 @@ class OpenAICompatibleProvider(
                 val code = conn.responseCode
                 if (code !in 200..299) {
                     val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $code"
-                    emit(ModelStreamEvent.Error(truncate(err)))
+                    emit(ModelStreamEvent.Error(friendlyError(code, err)))
                     return@withContext
                 }
                 val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
@@ -87,7 +87,7 @@ class OpenAICompatibleProvider(
                 val code = conn.responseCode
                 if (code !in 200..299) {
                     val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $code"
-                    throw IllegalStateException("provider ${descriptor.id} error: ${truncate(err)}")
+                    throw IllegalStateException("provider ${descriptor.id} error: ${friendlyError(code, err)}")
                 }
                 val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
                 val json = JSONObject(body)
@@ -111,7 +111,9 @@ class OpenAICompatibleProvider(
 
     override suspend fun health(): ProviderHealth = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
-            return@withContext ProviderHealth(false, 0, "not configured (no API key)")
+            // Zen supports anonymous free usage (per-IP rate-limited); a key
+            // only raises the quota. Availability is verified at request time.
+            return@withContext ProviderHealth(true, 0, "anonymous (free tier, rate-limited)")
         }
         val started = System.currentTimeMillis()
         try {
@@ -143,7 +145,9 @@ class OpenAICompatibleProvider(
         conn.doOutput = true
         conn.setRequestProperty("Content-Type", "application/json")
         conn.setRequestProperty("Accept", if (stream) "text/event-stream" else "application/json")
-        conn.setRequestProperty("Authorization", "Bearer $apiKey")
+        if (apiKey.isNotBlank()) {
+            conn.setRequestProperty("Authorization", "Bearer $apiKey")
+        }
         return conn
     }
 
@@ -192,6 +196,14 @@ class OpenAICompatibleProvider(
         }
     } catch (e: Exception) {
         null
+    }
+
+    private fun friendlyError(code: Int, raw: String): String {
+        if (code == 429) {
+            return "Free tier rate limit reached (anonymous). Add a free OpenCode Zen key via Configure, " +
+                "wait for the limit to reset, or use a local model."
+        }
+        return truncate(raw)
     }
 
     private fun truncate(s: String, max: Int = 400): String =

@@ -158,13 +158,14 @@ fun EngineScreen(
     )
     val models = registry.list()
     val selected = models.firstOrNull { it.id == selectedModelId }
-    val (connText, connOk) = when {
-        selected == null -> "not found" to false
+    val (connText, connColor) = when {
+        selected == null -> "not found" to OpRed
         selected.kind == ModelKind.LOCAL ->
-            if (modelFile.exists()) "Available" to true else "No model file" to false
+            if (modelFile.exists()) "Available" to Color(0xFF2ECC71)
+            else "No model file" to OpRed
         else ->
-            if (providerRegistry.apiKey(selected.provider).isNotBlank()) "Connected" to true
-            else "Not connected" to false
+            if (providerRegistry.apiKey(selected.provider).isNotBlank()) "Connected" to Color(0xFF2ECC71)
+            else "Free \u00b7 anonymous (rate-limited)" to Color(0xFFF5A623)
     }
     // Real engine state, driven only by actual operations (never faked).
     val headerState = if (routingModes[selectedMode] == RoutingMode.OFFLINE_ONLY &&
@@ -456,7 +457,7 @@ fun EngineScreen(
 
         Text("SELECTED", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(6.dp))
-        models.filter { it.id == selectedModelId }.forEach { ModelCard(it, connText, connOk) }
+        models.filter { it.id == selectedModelId }.forEach { ModelCard(it, connText, connColor) }
         if (registry.lastRefreshMs > 0) {
             Text(
                 "Catalog updated: ${formatCatalogTime(registry.lastRefreshMs)} \u00b7 ${models.size} models",
@@ -841,7 +842,7 @@ private fun ensureRemoteProvider(
 }
 
 @Composable
-private fun ModelCard(d: ModelDescriptor, connectionText: String, connectionOk: Boolean) {
+private fun ModelCard(d: ModelDescriptor, connectionText: String, connectionColor: Color) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -875,8 +876,8 @@ private fun ModelCard(d: ModelDescriptor, connectionText: String, connectionOk: 
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (connectionOk) "\u25cf $connectionText" else "\u00d7 $connectionText",
-                color = if (connectionOk) Color(0xFF2ECC71) else OpRed,
+                if (connectionColor != OpRed) "\u25cf $connectionText" else "\u00d7 $connectionText",
+                color = connectionColor,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
             )
@@ -945,7 +946,8 @@ private fun ApiKeyDialog(
         text = {
             Column {
                 Text(
-                    "Entered keys live only in memory for this session. They are never persisted, logged, or uploaded anywhere.",
+                    "Free models work without a key (anonymous, rate-limited). A key raises your quota. " +
+                        "Entered keys live only in memory for this session \u2014 never persisted or logged.",
                     color = OpTextSecondary,
                     fontSize = 12.sp,
                 )
