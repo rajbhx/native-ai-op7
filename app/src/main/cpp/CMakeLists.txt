@@ -29,7 +29,8 @@ add_subdirectory(
 add_library(native-lib SHARED
     native-lib.cpp
     NativeEngine.cpp
-    MemoryMonitor.cpp)
+    MemoryMonitor.cpp
+    hardware_detector.cpp)
 target_link_libraries(native-lib PRIVATE llama)
 target_include_directories(native-lib PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp/include

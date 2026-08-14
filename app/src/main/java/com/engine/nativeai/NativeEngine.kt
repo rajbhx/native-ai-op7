@@ -31,6 +31,7 @@ class NativeEngine : AutoCloseable {
             config.threads,
             config.gpuLayers,
             config.contextSize,
+            config.pinHighCores,
         )
         check(loaded) { "nativeInit failed for ${config.modelPath}" }
     }
@@ -92,7 +93,15 @@ class NativeEngine : AutoCloseable {
             threads = j.optInt("threads"),
             gpuLayers = j.optInt("gpu_layers"),
             gpuOffloadSupported = j.optBoolean("gpu_offload_supported"),
+            rssBytes = j.optLong("rss_bytes"),
+            rssLimitBytes = j.optLong("rss_limit_bytes"),
+            rssOverLimit = j.optBoolean("rss_over_limit"),
         )
+    }
+
+    /** Native RSS from /proc/self/statm (watchdog). */
+    suspend fun rssBytes(): Long = withContext(Dispatchers.IO) {
+        nativeGetRssBytes()
     }
 
     suspend fun backendInfo(): BackendInfo = withContext(Dispatchers.IO) {
@@ -115,7 +124,13 @@ class NativeEngine : AutoCloseable {
         }
     }
 
-    private external fun nativeInit(modelPath: String, threads: Int, gpuLayers: Int, nCtx: Int): Boolean
+    private external fun nativeInit(
+        modelPath: String,
+        threads: Int,
+        gpuLayers: Int,
+        nCtx: Int,
+        pinHighCores: Boolean,
+    ): Boolean
     private external fun nativeGenerate(prompt: String, maxTokens: Int): String
     private external fun nativeGenerateStream(
         prompt: String,
@@ -131,5 +146,6 @@ class NativeEngine : AutoCloseable {
     private external fun nativeCancel()
     private external fun nativeGetMemoryStats(): String
     private external fun nativeGetBackendInfo(): String
+    private external fun nativeGetRssBytes(): Long
     private external fun nativeUnload()
 }

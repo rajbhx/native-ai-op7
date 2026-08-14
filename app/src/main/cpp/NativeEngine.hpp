@@ -16,6 +16,9 @@ public:
         int32_t threads = 4;
         int32_t gpu_layers = 0;
         int32_t n_ctx = 2048;
+        // Blueprint Phase 2: pin llama worker threads to the high (Gold/Prime)
+        // cores. Measured on-device before any default is trusted (ADR-009).
+        bool pin_high_cores = true;
     };
 
     struct GenerationConfig {
@@ -51,6 +54,7 @@ public:
     void unload();
 
     bool loaded() const { return model_ != nullptr && ctx_ != nullptr; }
+    uint64_t rssBytes() const;
 
 private:
     void runGeneration(const std::string& prompt, int32_t max_tokens,
@@ -65,5 +69,6 @@ private:
     Config config_;
     enum ggml_type type_k_ = GGML_TYPE_Q8_0;
     enum ggml_type type_v_ = GGML_TYPE_Q8_0;
+    ggml_threadpool_t tp_ = nullptr;
     std::atomic<bool> cancel_{false};
 };

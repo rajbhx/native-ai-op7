@@ -30,12 +30,14 @@ JNIEXPORT jboolean JNICALL
 Java_com_engine_nativeai_NativeEngine_nativeInit(JNIEnv* env, jobject,
                                                  jstring model_path,
                                                  jint threads, jint gpu_layers,
-                                                 jint n_ctx) {
+                                                 jint n_ctx,
+                                                 jboolean pin_high_cores) {
     NativeEngine::Config cfg;
     cfg.model_path = jstring_to_utf8(env, model_path);
     cfg.threads = threads > 0 ? threads : 4;
     cfg.gpu_layers = gpu_layers;
     cfg.n_ctx = n_ctx > 0 ? n_ctx : 2048;
+    cfg.pin_high_cores = pin_high_cores == JNI_TRUE;
     return g_engine.init(cfg) ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -98,6 +100,11 @@ Java_com_engine_nativeai_NativeEngine_nativeCancel(JNIEnv*, jobject) {
 JNIEXPORT jstring JNICALL
 Java_com_engine_nativeai_NativeEngine_nativeGetMemoryStats(JNIEnv* env, jobject) {
     return env->NewStringUTF(g_engine.memoryStatsJson().c_str());
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_engine_nativeai_NativeEngine_nativeGetRssBytes(JNIEnv*, jobject) {
+    return static_cast<jlong>(g_engine.rssBytes());
 }
 
 JNIEXPORT jstring JNICALL

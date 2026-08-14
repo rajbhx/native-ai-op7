@@ -14,6 +14,9 @@ data class MemoryStats(
     val threads: Int,
     val gpuLayers: Int,
     val gpuOffloadSupported: Boolean,
+    val rssBytes: Long = 0,
+    val rssLimitBytes: Long = 0,
+    val rssOverLimit: Boolean = false,
 )
 
 data class BackendInfo(
