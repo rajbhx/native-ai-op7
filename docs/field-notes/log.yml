@@ -49,3 +49,23 @@ sections:
         cause: "llama_sampler_chain_params has just no_perf; penalties are a separate sampler object"
         solution: "add llama_sampler_init_penalties(n_vocab, last_n, repeat, 0, 0) to the chain before top_k/top_p/temp/dist"
         tags: [llama.cpp, sampling]
+      - id: A10
+        problem: "SafeExpr compile error: 'inferred type is () -> Int but SafeExpr.Ref was expected'"
+        cause: "parseExpr called with a trailing lambda { pos } instead of the Ref holder"
+        solution: "val pos = Ref(0); parseExpr(tokens, pos); check pos.value != tokens.size"
+        tags: [kotlin, parser, tests]
+      - id: A11
+        problem: "Redeclaration: ToolResult + 'Cannot find a parameter with this name: id/inputHash'"
+        cause: "agent tool result duplicated the Phase 2 DB record name ToolResult (MemoryModels.kt)"
+        solution: "rename tool-execution result to ToolOutput; the DB record keeps ToolResult"
+        tags: [kotlin, naming, agent]
+      - id: A12
+        problem: "'Returns are not allowed for functions with expression body' in parseSseEvent"
+        cause: "unlabeled return null inside fun ... = try { }"
+        solution: "make the if/else the try value; no bare return"
+        tags: [kotlin, sse, openai]
+      - id: A13
+        problem: "'Smart cast to ModelDescriptor is impossible — captured by a changing closure'"
+        cause: "nullable var reassigned inside a catch while read inside flow lambdas"
+        solution: "non-null via ?: run { emit(Error); return@flow }; var stays non-null"
+        tags: [kotlin, smart-cast, agent]
