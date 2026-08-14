@@ -84,3 +84,8 @@ sections:
         cause: "Phase 2 scoring predated the math spec (score = utility*0.5 + recency*0.3 + success*0.2)"
         solution: "ftsCandidates selects bm25(experiences_fts) AS bm25_rank; score = -rank * exp(-0.05*ageDays) + small tiebreaks; decay SQL lambda 0.02 -> 0.05"
         tags: [sqlite, fts5, ranking, math]
+      - id: A17
+        problem: "FGS specialUse requires both the permission and the subtype property at targetSdk 34"
+        cause: "Android 14 introduced FOREGROUND_SERVICE_SPECIAL_USE with a required PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        solution: "declare FOREGROUND_SERVICE + FOREGROUND_SERVICE_SPECIAL_USE + POST_NOTIFICATIONS; service foregroundServiceType=specialUse + property; request POST_NOTIFICATIONS at runtime (API 33+)"
+        tags: [android, foreground-service, manifest]
