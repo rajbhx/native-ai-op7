@@ -14,6 +14,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +32,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
@@ -50,6 +54,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
@@ -71,6 +77,7 @@ import com.engine.nativeai.ModelDownloader
 import com.engine.nativeai.DownloadResult
 import com.engine.nativeai.MemorySearchTool
 import com.engine.nativeai.ModelCatalog
+import com.engine.nativeai.ModelAvailability
 import com.engine.nativeai.ModelCostTier
 import com.engine.nativeai.ModelDiscoveryService
 import com.engine.nativeai.ModelKind
@@ -89,12 +96,14 @@ import com.engine.nativeai.ThinkingAgent
 import com.engine.nativeai.ToolRegistry
 import com.engine.nativeai.WebSearchTool
 import java.io.File
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
  * OxygenOS Model Hub + Live Agent Trace dashboard (blueprint Phase 6).
  * Plain Compose, no external UI framework; design tokens from Theme.kt.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EngineScreen(
     engine: NativeEngine,
@@ -113,12 +122,16 @@ fun EngineScreen(
     }
     var prompt by remember { mutableStateOf("") }
     var output by remember { mutableStateOf("") }
+    var answer by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
+    var traceExpanded by remember { mutableStateOf(true) }
     var serviceOn by remember { mutableStateOf(false) }
     var engineState by remember { mutableStateOf(EngineUiState.READY) }
     var selectedMode by remember { mutableStateOf(modeIndexFor(prefs.routingMode)) }
     var selectedModelId by remember { mutableStateOf(prefs.lastSelectedModelId ?: "local-llama") }
     var favorites by remember { mutableStateOf(prefs.favorites()) }
+    var showSettingsSheet by remember { mutableStateOf(false) }
+    var runJob by remember { mutableStateOf<Job?>(null) }
     var showPicker by remember { mutableStateOf(false) }
     var showKeyDialog by remember { mutableStateOf(false) }
     var keyProviderId by remember { mutableStateOf<String?>(null) }
@@ -207,7 +220,6 @@ fun EngineScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(OpBg)
-            .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
         // ---------------- HEADER (real engine state) ----------------
@@ -223,10 +235,10 @@ fun EngineScreen(
                             .size(8.dp)
                             .background(
                                 when (headerState) {
-                                    EngineUiState.COMPLETED -> Color(0xFF2ECC71)
+                                    EngineUiState.COMPLETED -> OpSuccess
                                     EngineUiState.ERROR -> OpRed
                                     EngineUiState.OFFLINE -> OpTextSecondary
-                                    else -> OpRed
+                                    else -> OpAmber
                                 },
                                 RoundedCornerShape(4.dp),
                             ),
@@ -234,10 +246,38 @@ fun EngineScreen(
                     Spacer(Modifier.width(6.dp))
                     Text(headerState.label, color = OpText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
-                Text("OP7", color = OpTextSecondary, fontSize = 11.sp)
+                Text("OP7", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("SD855 \u00b7 8 GB", color = OpTextSecondary, fontSize = 9.sp)
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(10.dp))
+
+        // ---------------- ACTIVE MODEL CHIP (opens settings sheet) ----------------
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(OpCard, RoundedCornerShape(16.dp))
+                .border(BorderStroke(1.dp, OpBorder), RoundedCornerShape(16.dp))
+                .clickable { showSettingsSheet = true }
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Text(
+                "Model \u00b7 ${selectedModelName(models, selectedModelId)}",
+                color = OpText,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                activeModelSummary(selected),
+                color = OpTextSecondary,
+                fontSize = 11.sp,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("\u2699", color = OpTextSecondary, fontSize = 14.sp)
+        }
+        Spacer(Modifier.height(8.dp))
         Text(status, color = OpTextSecondary, fontSize = 12.sp)
         Spacer(Modifier.height(12.dp))
 
@@ -250,6 +290,7 @@ fun EngineScreen(
                 placeholder = { Text("What do you want me to do?", color = OpTextSecondary) },
                 minLines = 2,
                 maxLines = 6,
+                isError = false,
                 trailingIcon = {
                     if (prompt.isNotEmpty()) {
                         Text(
@@ -264,105 +305,61 @@ fun EngineScreen(
                 },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = OpRed,
-                    unfocusedBorderColor = OpDivider,
+                    unfocusedBorderColor = OpBorder,
+                    errorBorderColor = OpRed,
                     cursorColor = OpRed,
                 ),
             )
             Spacer(Modifier.width(8.dp))
             Button(
                 onClick = {
-                    scope.launch {
-                        if (prompt.isBlank()) return@launch
-                        if (!ensureLocalLoaded()) return@launch
-                        running = true
-                        output = ""
-                        engineState = EngineUiState.THINKING
-                        status = "generating\u2026"
+                    if (prompt.isBlank()) return@Button
+                    runJob = scope.launch {
                         try {
+                            if (!ensureLocalLoaded()) return@launch
+                            running = true
+                            output = ""
+                            answer = ""
+                            engineState = EngineUiState.THINKING
+                            status = "generating\u2026"
                             val sb = StringBuilder()
                             engine.generateStream(prompt, GenerationConfig(maxTokens = 64))
-                                .collect { sb.append(it); output = sb.toString() }
-                            status = "done (${sb.length} chars)"
+                                .collect { sb.append(it); answer = sb.toString() }
+                            status = "generation complete (${sb.length} chars)"
                             engineState = EngineUiState.COMPLETED
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            status = "generation stopped"
+                            engineState = EngineUiState.READY
                         } catch (e: Exception) {
                             status = "generate failed: ${e.message}"
                             engineState = EngineUiState.ERROR
                         } finally {
                             running = false
+                            runJob = null
                         }
                     }
                 },
                 enabled = prompt.isNotBlank() && !running,
                 shape = RoundedCornerShape(24.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (running) OpCard else OpRed,
+                    containerColor = OpCard,
                     contentColor = OpText,
                 ),
+                border = BorderStroke(1.dp, OpBorder),
                 modifier = Modifier.size(48.dp),
             ) {
                 Text("\u2191", fontSize = 20.sp)
             }
         }
-        Spacer(Modifier.height(12.dp))
-
-        // ---------------- CPU THREADS ----------------
-        Text("CPU THREADS", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            listOf(2, 3, 4, 5, 6).forEach { n ->
-                SegmentedPill("$n", selected = threads == n, modifier = Modifier.padding(end = 8.dp)) {
-                    threads = n
-                }
-            }
-        }
-        Text("Recommended: 4 \u00b7 Snapdragon 855 (Kryo 485)", color = OpTextSecondary, fontSize = 10.sp)
-        Spacer(Modifier.height(8.dp))
-        Text("CONTEXT", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            listOf(512, 1024, 2048).forEach { n ->
-                SegmentedPill("$n", selected = contextSize == n, modifier = Modifier.padding(end = 8.dp)) {
-                    contextSize = n
-                }
-            }
-        }
+        Text(
+            "\u2191 Send \u00b7 quick local completion \u2014 Agent runs the full tool loop",
+            color = OpTextSecondary,
+            fontSize = 10.sp,
+            modifier = Modifier.padding(top = 4.dp, start = 2.dp),
+        )
         Spacer(Modifier.height(12.dp))
 
         // ---------------- PRIMARY ACTIONS ----------------
-        Row(Modifier.fillMaxWidth()) {
-            PillButton("Load Model", Modifier.weight(1f), enabled = !running) {
-                scope.launch {
-                    engineState = EngineUiState.LOADING
-                    status = "loading model\u2026"
-                    if (ensureLocalLoaded()) {
-                        engineState = EngineUiState.COMPLETED
-                    }
-                }
-            }
-            Spacer(Modifier.width(8.dp))
-            PillButton("Generate", Modifier.weight(1f), enabled = !running && prompt.isNotBlank()) {
-                scope.launch {
-                    if (!ensureLocalLoaded()) return@launch
-                    running = true
-                    output = ""
-                    engineState = EngineUiState.THINKING
-                    status = "generating\u2026"
-                    try {
-                        val sb = StringBuilder()
-                        engine.generateStream(prompt, GenerationConfig(maxTokens = 64))
-                            .collect { sb.append(it); output = sb.toString() }
-                        status = "done (${sb.length} chars)"
-                        engineState = EngineUiState.COMPLETED
-                    } catch (e: Exception) {
-                        status = "generate failed: ${e.message}"
-                        engineState = EngineUiState.ERROR
-                    } finally {
-                        running = false
-                    }
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth()) {
             PillButton(
                 if (running) "Agent \u00b7 RUNNING" else "Agent",
@@ -371,8 +368,6 @@ fun EngineScreen(
                 enabled = !running,
             ) {
                 scope.launch {
-                    // One-tap usability: load the local model first when the
-                    // user picked local but hasn't loaded it yet.
                     if (selectedModelId == "local-llama" && !ensureLocalLoaded()) return@launch
                     runAgent(
                         context = context,
@@ -388,242 +383,385 @@ fun EngineScreen(
                         setRunning = { running = it },
                         setStatus = { status = it },
                         setOutput = { output = it },
+                        setAnswer = { answer = it },
+                        setRunJob = { runJob = it },
                         setEngineState = { engineState = it },
                         scope = scope,
                     )
                 }
             }
             Spacer(Modifier.width(8.dp))
-            PillButton("Stats", Modifier.weight(1f), enabled = !running) {
-                scope.launch {
-                    if (!ensureLocalLoaded()) return@launch
-                    try {
-                        val s = engine.memoryStats()
-                        status = "model=${s.modelBytes / (1024 * 1024)} MB | ctx=${s.nCtx} | " +
-                            "kv=${s.kvTypeK}/${s.kvTypeV} | threads=${s.threads} | " +
-                            "gpu=${s.gpuLayers} | gpuOffload=${s.gpuOffloadSupported} | " +
-                            "rss=${s.rssBytes / (1024 * 1024)} MB" +
-                            (if (s.rssOverLimit) " | OVER 1.5GB LIMIT" else "")
-                    } catch (e: Exception) {
-                        status = "stats failed: ${e.message}"
-                    }
+            if (running) {
+                PillButton("Stop", Modifier.weight(1f), enabled = true) {
+                    runJob?.cancel()
+                }
+            } else {
+                PillButton(
+                    "Clear",
+                    Modifier.weight(1f),
+                    enabled = prompt.isNotBlank() || answer.isNotBlank() || output.isNotBlank(),
+                ) {
+                    prompt = ""
+                    answer = ""
+                    output = ""
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
-        PillButton(
-            if (serviceOn) "STOP SERVICE" else "Start service",
-            Modifier.fillMaxWidth(),
-            primary = serviceOn,
-            enabled = !running,
-        ) {
-            val next = !serviceOn
-            try {
-                if (next) {
-                    EngineForegroundService.start(context)
-                } else {
-                    EngineForegroundService.stop(context)
-                }
-                serviceOn = next
-            } catch (e: Exception) {
-                status = "service failed: ${e.message}"
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        PillButton("Download GGUF model", Modifier.fillMaxWidth(), enabled = !running && !downloading) {
-            downloadStatus = ""
-            downloadProgress = null
-            showDownloadDialog = true
-        }
+        Spacer(Modifier.height(12.dp))
 
-        Spacer(Modifier.height(18.dp))
-        Text("MODEL HUB", color = OpText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-
+        // ---------------- LOG ZONE: AGENT TRACE ----------------
         Row(
-            Modifier
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
                 .fillMaxWidth()
-                .background(OpCard, RoundedCornerShape(24.dp))
-                .padding(4.dp),
+                .clickable { traceExpanded = !traceExpanded },
         ) {
-            modes.forEachIndexed { i, label ->
-                SegmentedPill(label, selected = i == selectedMode, Modifier.weight(1f)) {
-                    selectedMode = i
-                    prefs.routingMode = routingModes[i]
-                }
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-
-        Text("SELECTED", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(6.dp))
-        models.filter { it.id == selectedModelId }.forEach { ModelCard(it, connText, connColor) }
-        if (registry.lastRefreshMs > 0) {
-            Text(
-                "Catalog updated: ${formatCatalogTime(registry.lastRefreshMs)} \u00b7 ${models.size} models",
-                color = OpTextSecondary,
-                fontSize = 10.sp,
-            )
+            Text("AGENT TRACE", color = OpText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            Text(if (traceExpanded) "\u25be" else "\u25b8", color = OpTextSecondary, fontSize = 14.sp)
         }
         Spacer(Modifier.height(8.dp))
-        Row(Modifier.fillMaxWidth()) {
-            if (selected?.kind == ModelKind.REMOTE) {
-                PillButton("Configure", Modifier.weight(1f), enabled = !running) {
-                    keyProviderId = selected.provider
-                    keyInput = providerRegistry.apiKey(selected.provider)
-                    showKeyDialog = true
-                }
-                Spacer(Modifier.width(8.dp))
-            }
-            PillButton("Pick Model", Modifier.weight(1f), primary = true, enabled = !running) {
-                showPicker = true
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        if (showPicker) {
-            ModelPickerDialog(
-                models = models,
-                selectedId = selectedModelId,
-                lastUpdated = registry.lastRefreshMs,
-                favorites = favorites,
-                onSelect = { d ->
-                    selectedModelId = d.id
-                    prefs.lastSelectedModelId = d.id
-                    if (d.kind == ModelKind.REMOTE) {
-                        ensureRemoteProvider(registry, providerRegistry, prefs, d)
-                    }
-                    showPicker = false
-                },
-                onToggleFavorite = { id ->
-                    favorites = prefs.toggleFavorite(id)
-                },
-                onRefresh = {
-                    scope.launch {
-                        val r = discovery.refresh()
-                        status = if (r.error == null) {
-                            "discovery: ${r.found} new models, ${registry.list().size} total (${r.endpoint})"
-                        } else {
-                            "discovery failed: ${r.error} (using cached catalog)"
-                        }
-                    }
-                },
-                onDismiss = { showPicker = false },
-            )
-        }
-
-        if (showKeyDialog && keyProviderId != null) {
-            ApiKeyDialog(
-                provider = keyProviderId!!,
-                initial = keyInput,
-                onSave = { key ->
-                    providerRegistry.setApiKey(keyProviderId!!, key.trim())
-                    // Recreate the live provider so the running agent picks up the new key.
-                    models.firstOrNull { it.provider == keyProviderId }?.let { d ->
-                        registry.remove(d.id)
-                        ensureRemoteProvider(registry, providerRegistry, prefs, d)
-                    }
-                    showKeyDialog = false
-                    status = "API key set for ${keyProviderId} (memory only, never persisted)"
-                },
-                onClear = {
-                    providerRegistry.clearApiKey(keyProviderId!!)
-                    models.firstOrNull { it.provider == keyProviderId }?.let { d ->
-                        registry.remove(d.id)
-                        ensureRemoteProvider(registry, providerRegistry, prefs, d)
-                    }
-                    showKeyDialog = false
-                    status = "API key cleared for ${keyProviderId}"
-                },
-                onDismiss = { showKeyDialog = false },
-            )
-        }
-
-        if (showDownloadDialog) {
-            ModelDownloadDialog(
-                downloading = downloading,
-                progress = downloadProgress,
-                status = downloadStatus,
-                onPick = { url ->
-                    downloadStatus = ""
-                    downloadProgress = null
-                },
-                onDownload = { url ->
-                    scope.launch {
-                        downloading = true
-                        downloadProgress = null
-                        downloadStatus = "connecting\u2026"
-                        val result = ModelDownloader(modelFile).download(
-                            url = url,
-                            onProgress = { done, total ->
-                                downloadProgress = if (total != null && total > 0) {
-                                    (done.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                                } else {
-                                    null
+        if (traceExpanded) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(OpCard, RoundedCornerShape(12.dp)),
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(12.dp),
+                ) {
+                    if (output.isBlank() && answer.isBlank()) {
+                        Text("Trace will appear here\u2026", color = OpTextSecondary, fontSize = 13.sp)
+                    } else {
+                        output.lineSequence().forEach { line -> TraceLine(line) }
+                        if (answer.isNotBlank()) {
+                            Spacer(Modifier.height(8.dp))
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .background(OpBg, RoundedCornerShape(8.dp))
+                                    .padding(8.dp),
+                            ) {
+                                SelectionContainer {
+                                    Text(
+                                        answer,
+                                        color = OpText,
+                                        fontSize = 13.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
                                 }
-                                downloadStatus = "downloaded ${done / (1024 * 1024)} MB" +
-                                    (total?.let { " / ${it / (1024 * 1024)} MB" } ?: "")
-                            },
-                            cancelled = downloadCancel,
-                        )
-                        downloading = false
-                        when (result) {
-                            is DownloadResult.Success -> {
-                                downloadProgress = 1f
-                                downloadStatus = "saved ${modelFile.name} (${result.bytes / (1024 * 1024)} MB) \u2014 tap Load Model"
-                                status = "Model downloaded: ${modelFile.name} \u2014 tap Load Model"
-                            }
-                            is DownloadResult.Error -> {
-                                downloadStatus = "failed: ${result.message}"
-                                status = "download failed: ${result.message}"
                             }
                         }
-                    }
-                },
-                onCancel = { downloadCancel.set(true) },
-                onDismiss = {
-                    if (!downloading) showDownloadDialog = false
-                },
-            )
-        }
-
-        Spacer(Modifier.height(18.dp))
-        Text("AGENT TRACE", color = OpText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .background(OpCard, RoundedCornerShape(12.dp)),
-        ) {
-            Column(Modifier.padding(12.dp)) {
-                if (output.isBlank()) {
-                    Text("Trace will appear here\u2026", color = OpTextSecondary, fontSize = 13.sp)
-                } else {
-                    SelectionContainer {
-                        Text(
-                            formatTrace(output),
-                            color = OpText,
-                            fontSize = 13.sp,
-                            fontFamily = FontFamily.Monospace,
-                        )
                     }
                 }
             }
         }
         HorizonLight(active = running)
-        Spacer(Modifier.height(24.dp))
+    }
+
+    // ---------------- ENGINE SETTINGS (modal bottom sheet) ----------------
+    if (showSettingsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSettingsSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = OpCard,
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 32.dp),
+            ) {
+                Text("ENGINE SETTINGS", color = OpText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text("Active execution view stays clean \u2014 tune hardware here.", color = OpTextSecondary, fontSize = 11.sp)
+                Spacer(Modifier.height(14.dp))
+
+                Text("MODEL TIER", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(OpBg, RoundedCornerShape(24.dp))
+                        .padding(4.dp),
+                ) {
+                    modes.forEachIndexed { i, label ->
+                        ValuePill(label, selected = i == selectedMode, modifier = Modifier.weight(1f)) {
+                            selectedMode = i
+                            prefs.routingMode = routingModes[i]
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+
+                Text("ACTIVE MODEL", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                models.filter { it.id == selectedModelId }.forEach {
+                    ModelCard(
+                        d = it,
+                        connectionText = connText,
+                        connectionColor = connColor,
+                        localLoaded = loaded,
+                        modelFileExists = modelFile.exists(),
+                        onLoadLocal = {
+                            scope.launch {
+                                engineState = EngineUiState.LOADING
+                                status = "loading model\u2026"
+                                if (ensureLocalLoaded()) {
+                                    engineState = EngineUiState.COMPLETED
+                                }
+                            }
+                        },
+                        onChange = {
+                            showSettingsSheet = false
+                            showPicker = true
+                        },
+                    )
+                }
+                if (registry.lastRefreshMs > 0) {
+                    Text(
+                        "Catalog updated: ${formatCatalogTime(registry.lastRefreshMs)} \u00b7 ${models.size} models",
+                        color = OpTextSecondary,
+                        fontSize = 10.sp,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+
+                Text("HARDWARE TUNING", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Text("CPU THREADS", color = OpTextSecondary, fontSize = 10.sp)
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    listOf(2, 3, 4, 5, 6).forEach { n ->
+                        ValuePill("$n", selected = threads == n, modifier = Modifier.padding(end = 8.dp)) {
+                            threads = n
+                        }
+                    }
+                }
+                Text("Recommended: 4 \u00b7 Snapdragon 855 (Kryo 485)", color = OpTextSecondary, fontSize = 10.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("CONTEXT", color = OpTextSecondary, fontSize = 10.sp)
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    listOf(512, 1024, 2048).forEach { n ->
+                        ValuePill("$n", selected = contextSize == n, modifier = Modifier.padding(end = 8.dp)) {
+                            contextSize = n
+                        }
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+
+                Row(Modifier.fillMaxWidth()) {
+                    PillButton(
+                        if (serviceOn) "STOP SERVICE" else "Start service",
+                        Modifier.weight(1f),
+                        enabled = !running,
+                    ) {
+                        val next = !serviceOn
+                        try {
+                            if (next) {
+                                EngineForegroundService.start(context)
+                            } else {
+                                EngineForegroundService.stop(context)
+                            }
+                            serviceOn = next
+                        } catch (e: Exception) {
+                            status = "service failed: ${e.message}"
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    PillButton("Download GGUF model", Modifier.weight(1f), enabled = !running && !downloading) {
+                        downloadStatus = ""
+                        downloadProgress = null
+                        showSettingsSheet = false
+                        showDownloadDialog = true
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                PillButton("Stats", Modifier.fillMaxWidth(), enabled = !running) {
+                    scope.launch {
+                        if (!ensureLocalLoaded()) return@launch
+                        try {
+                            val s = engine.memoryStats()
+                            status = "model=${s.modelBytes / (1024 * 1024)} MB | ctx=${s.nCtx} | " +
+                                "kv=${s.kvTypeK}/${s.kvTypeV} | threads=${s.threads} | " +
+                                "gpu=${s.gpuLayers} | gpuOffload=${s.gpuOffloadSupported} | " +
+                                "rss=${s.rssBytes / (1024 * 1024)} MB" +
+                                (if (s.rssOverLimit) " | OVER 1.5GB LIMIT" else "")
+                        } catch (e: Exception) {
+                            status = "stats failed: ${e.message}"
+                        }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Service keeps the engine alive in the background \u00b7 Download fetches a GGUF to ${modelFile.name}",
+                    color = OpTextSecondary,
+                    fontSize = 10.sp,
+                )
+            }
+        }
+    }
+
+    // ---------------- DIALOGS (overlays) ----------------
+    if (showPicker) {
+        ModelPickerDialog(
+            models = models,
+            selectedId = selectedModelId,
+            lastUpdated = registry.lastRefreshMs,
+            favorites = favorites,
+            onSelect = { d ->
+                selectedModelId = d.id
+                prefs.lastSelectedModelId = d.id
+                if (d.kind == ModelKind.REMOTE) {
+                    ensureRemoteProvider(registry, providerRegistry, prefs, d)
+                }
+                showPicker = false
+            },
+            onToggleFavorite = { id ->
+                favorites = prefs.toggleFavorite(id)
+            },
+            onRefresh = {
+                scope.launch {
+                    val r = discovery.refresh()
+                    status = if (r.error == null) {
+                        "discovery: ${r.found} new models, ${registry.list().size} total (${r.endpoint})"
+                    } else {
+                        "discovery failed: ${r.error} (using cached catalog)"
+                    }
+                }
+            },
+            onConfigure = { d ->
+                keyProviderId = d.provider
+                keyInput = providerRegistry.apiKey(d.provider)
+                showPicker = false
+                showKeyDialog = true
+            },
+            onDismiss = { showPicker = false },
+        )
+    }
+
+    if (showKeyDialog && keyProviderId != null) {
+        ApiKeyDialog(
+            provider = keyProviderId!!,
+            initial = keyInput,
+            onSave = { key ->
+                providerRegistry.setApiKey(keyProviderId!!, key.trim())
+                models.firstOrNull { it.provider == keyProviderId }?.let { d ->
+                    registry.remove(d.id)
+                    ensureRemoteProvider(registry, providerRegistry, prefs, d)
+                }
+                showKeyDialog = false
+                status = "API key set for ${keyProviderId} (memory only, never persisted)"
+            },
+            onClear = {
+                providerRegistry.clearApiKey(keyProviderId!!)
+                models.firstOrNull { it.provider == keyProviderId }?.let { d ->
+                    registry.remove(d.id)
+                    ensureRemoteProvider(registry, providerRegistry, prefs, d)
+                }
+                showKeyDialog = false
+                status = "API key cleared for ${keyProviderId}"
+            },
+            onDismiss = { showKeyDialog = false },
+        )
+    }
+
+    if (showDownloadDialog) {
+        ModelDownloadDialog(
+            downloading = downloading,
+            progress = downloadProgress,
+            status = downloadStatus,
+            onPick = { url ->
+                downloadStatus = ""
+                downloadProgress = null
+            },
+            onDownload = { url ->
+                scope.launch {
+                    downloading = true
+                    downloadProgress = null
+                    downloadStatus = "connecting\u2026"
+                    val result = ModelDownloader(modelFile).download(
+                        url = url,
+                        onProgress = { done, total ->
+                            downloadProgress = if (total != null && total > 0) {
+                                (done.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                            } else {
+                                null
+                            }
+                            downloadStatus = "downloaded ${done / (1024 * 1024)} MB" +
+                                (total?.let { " / ${it / (1024 * 1024)} MB" } ?: "")
+                        },
+                        cancelled = downloadCancel,
+                    )
+                    downloading = false
+                    when (result) {
+                        is DownloadResult.Success -> {
+                            downloadProgress = 1f
+                            downloadStatus = "saved ${modelFile.name} (${result.bytes / (1024 * 1024)} MB) \u2014 tap Load Model"
+                            status = "Model downloaded: ${modelFile.name} \u2014 tap Load Model"
+                        }
+                        is DownloadResult.Error -> {
+                            downloadStatus = "failed: ${result.message}"
+                            status = "download failed: ${result.message}"
+                        }
+                    }
+                }
+            },
+            onCancel = { downloadCancel.set(true) },
+            onDismiss = {
+                if (!downloading) showDownloadDialog = false
+            },
+        )
     }
 }
 
-/** Renders the real agent event log with a structured step rail. */
-private fun formatTrace(raw: String): String =
-    raw.lineSequence().joinToString("\n") { line ->
-        when {
-            line.startsWith("[tool]") || line.startsWith("[obs]") || line.startsWith("[verify]") ->
-                "   $line"
-            line.startsWith("[") -> "\u25cf $line"
-            else -> line
-        }
+/** One line of the agent step log: steps get a colored dot, metadata is
+ *  indented, and raw text stays left-aligned. */
+@Composable
+private fun TraceLine(line: String) {
+    val t = line.trim()
+    when {
+        t.startsWith("[ERROR]") -> StepRow(t, OpRed)
+        t.startsWith("[VERIFY]") -> StepRow(t, OpSuccess)
+        t.startsWith("[TOOL]") -> StepRow(t, OpBlue)
+        t.startsWith("[OBS]") -> Text(
+            t, color = OpTextSecondary, fontSize = 12.sp,
+            modifier = Modifier.padding(start = 12.dp, top = 2.dp),
+        )
+        t.startsWith("[") && t.endsWith("]") -> StepRow(t, OpAmber)
+        t.startsWith("MODEL ") || t.startsWith("PROVIDER ") ||
+            t.startsWith("MODE ") || t.startsWith("STATUS ") -> Text(
+            t, color = OpTextSecondary, fontSize = 12.sp,
+            modifier = Modifier.padding(start = 12.dp),
+        )
+        t.isBlank() -> Spacer(Modifier.height(2.dp))
+        else -> Text(
+            t, color = OpText, fontSize = 12.sp,
+            modifier = Modifier.padding(start = 12.dp, top = 2.dp),
+        )
     }
+}
+
+@Composable
+private fun StepRow(text: String, color: Color) {
+    Row(
+        Modifier.padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(6.dp)
+                .background(color, RoundedCornerShape(3.dp)),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(text, color = OpText, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    }
+}
 
 /** Engine console state shown in the header, driven by real operations. */
 private enum class EngineUiState(val label: String) {
@@ -651,6 +789,8 @@ private fun runAgent(
     setRunning: (Boolean) -> Unit,
     setStatus: (String) -> Unit,
     setOutput: (String) -> Unit,
+    setAnswer: (String) -> Unit,
+    setRunJob: (Job?) -> Unit,
     setEngineState: (EngineUiState) -> Unit,
     scope: kotlinx.coroutines.CoroutineScope,
 ) {
@@ -662,9 +802,10 @@ private fun runAgent(
     }
     setRunning(true)
     setOutput("")
+    setAnswer("")
     setStatus("agent running\u2026")
     setEngineState(EngineUiState.THINKING)
-    scope.launch {
+    setRunJob(scope.launch {
         val memory = MemoryDatabase(context)
         val tools = ToolRegistry().apply {
             register(MemorySearchTool(memory))
@@ -689,17 +830,18 @@ private fun runAgent(
             null // memory failure must never crash the agent
         }
         try {
-            val sb = StringBuilder()
+            val steps = StringBuilder()
+            val answer = StringBuilder()
             var done = false
             agent.run(prompt, GenerationConfig(maxTokens = 256)).collect { ev ->
                 when (ev) {
                     is AgentEvent.Token -> {
-                        sb.append(ev.text)
-                        setOutput(sb.toString())
+                        answer.append(ev.text)
+                        setAnswer(answer.toString())
                     }
                     is AgentEvent.Stage -> {
-                        sb.append("\n[${ev.state}]")
-                        setOutput(sb.toString())
+                        steps.appendLine("[${ev.state}]")
+                        setOutput(steps.toString())
                         setEngineState(
                             when (ev.state) {
                                 AgentState.VERIFY -> EngineUiState.VERIFYING
@@ -711,37 +853,40 @@ private fun runAgent(
                     }
                     is AgentEvent.Routed -> {
                         val remote = ev.provider != "local"
-                        sb.append(
-                            "\nMODEL ${ev.modelId}" +
-                                "\nPROVIDER ${ev.provider}" +
-                                "\nMODE ${if (remote) "Remote (${modeLabel})" else modeLabel}" +
-                                "\nSTATUS ${if (remote) "Running · remote request" else "Running · local"}" +
-                                "\n[${ev.taskType} | ${ev.costTier}]\n",
-                        )
-                        setOutput(sb.toString())
+                        steps.appendLine("MODEL ${ev.modelId}")
+                        steps.appendLine("PROVIDER ${ev.provider}")
+                        steps.appendLine("MODE ${if (remote) "Remote (${modeLabel})" else modeLabel}")
+                        steps.appendLine("STATUS ${if (remote) "Running · remote request" else "Running · local"}")
+                        steps.appendLine("[${ev.taskType} | ${ev.costTier}]")
+                        setOutput(steps.toString())
                     }
                     is AgentEvent.ToolCall -> {
-                        sb.append("\n[tool] ${ev.tool}(${ev.input})")
-                        setOutput(sb.toString())
+                        steps.appendLine("[TOOL] ${ev.tool}(${ev.input})")
+                        setOutput(steps.toString())
                         setEngineState(EngineUiState.TOOL)
                     }
                     is AgentEvent.Observation -> {
-                        sb.append("\n[obs] ${ev.output.take(240)}")
-                        setOutput(sb.toString())
+                        steps.appendLine("[OBS] ${ev.output.take(240)}")
+                        setOutput(steps.toString())
                     }
                     is AgentEvent.Verification -> {
-                        sb.append("\n[verify] ${ev.tool}: " +
+                        steps.appendLine("[VERIFY] ${ev.tool}: " +
                             if (ev.passed) "passed" else "failed")
-                        setOutput(sb.toString())
+                        setOutput(steps.toString())
                         setEngineState(EngineUiState.VERIFYING)
                     }
                     is AgentEvent.Final -> {
                         done = true
-                        sb.append("\n\nFINAL: ${ev.answer}")
-                        setOutput(sb.toString())
+                        steps.appendLine("[FINAL]")
+                        answer.setLength(0)
+                        answer.append(ev.answer)
+                        setOutput(steps.toString())
+                        setAnswer(answer.toString())
                         setEngineState(EngineUiState.COMPLETED)
                     }
                     is AgentEvent.Error -> {
+                        steps.appendLine("[ERROR] ${ev.message}")
+                        setOutput(steps.toString())
                         setStatus("agent error: ${ev.message}")
                         setEngineState(EngineUiState.ERROR)
                     }
@@ -749,6 +894,9 @@ private fun runAgent(
             }
             setStatus(if (done) "agent done" else "agent ended without final answer")
             if (!done) setEngineState(EngineUiState.READY)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            setStatus("agent stopped")
+            setEngineState(EngineUiState.READY)
         } catch (e: Exception) {
             setStatus("agent failed: ${e.message}")
             setEngineState(EngineUiState.ERROR)
@@ -762,7 +910,8 @@ private fun runAgent(
             }
             setRunning(false)
         }
-    }
+        setRunJob(null)
+    })
 }
 
 @Composable
@@ -791,23 +940,29 @@ private fun PillButton(
 }
 
 @Composable
-private fun SegmentedPill(
+private fun ValuePill(
     text: String,
     selected: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    Button(
-        onClick = onClick,
-        modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (selected) OpRed else Color.Transparent,
-            contentColor = if (selected) OpText else OpTextSecondary,
-        ),
-    ) {
-        Text(text, fontSize = 12.sp)
-    }
+    Text(
+        text = text,
+        color = if (selected) OpText else OpTextSecondary,
+        fontSize = 12.sp,
+        maxLines = 1,
+        modifier = modifier
+            .background(
+                if (selected) OpCard else Color.Transparent,
+                RoundedCornerShape(20.dp),
+            )
+            .border(
+                BorderStroke(1.dp, if (selected) OpBorder else OpDivider),
+                RoundedCornerShape(20.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    )
 }
 
 private fun modeIndexFor(mode: RoutingMode): Int = when (mode) {
@@ -819,6 +974,16 @@ private fun modeIndexFor(mode: RoutingMode): Int = when (mode) {
 
 private fun selectedModelName(models: List<ModelDescriptor>, id: String?): String =
     models.firstOrNull { it.id == id }?.displayName ?: (id ?: "none")
+
+private fun activeModelSummary(d: ModelDescriptor?): String {
+    if (d == null) return "not selected"
+    val tier = when (d.costTier) {
+        ModelCostTier.FREE -> "FREE"
+        ModelCostTier.PAID -> "PAID"
+        ModelCostTier.UNKNOWN -> if (d.kind == ModelKind.LOCAL) "LOCAL" else "?"
+    }
+    return "$tier \u00b7 ${d.contextLength ?: "?"} ctx"
+}
 
 private fun formatCatalogTime(epochMs: Long): String {
     val f = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
@@ -842,7 +1007,15 @@ private fun ensureRemoteProvider(
 }
 
 @Composable
-private fun ModelCard(d: ModelDescriptor, connectionText: String, connectionColor: Color) {
+private fun ModelCard(
+    d: ModelDescriptor,
+    connectionText: String,
+    connectionColor: Color,
+    localLoaded: Boolean,
+    modelFileExists: Boolean,
+    onLoadLocal: () -> Unit,
+    onChange: () -> Unit,
+) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -860,38 +1033,102 @@ private fun ModelCard(d: ModelDescriptor, connectionText: String, connectionColo
             )
             ProviderPill(if (d.kind == ModelKind.LOCAL) "LOCAL" else "REMOTE")
             when (d.costTier) {
-                ModelCostTier.FREE -> ProviderPill("FREE", red = true)
-                ModelCostTier.PAID -> ProviderPill("PAID")
-                ModelCostTier.UNKNOWN -> ProviderPill("?")
+                ModelCostTier.FREE -> ProviderPill("FREE", color = OpAmber)
+                ModelCostTier.PAID -> ProviderPill("PAID", color = OpTextSecondary)
+                ModelCostTier.UNKNOWN -> ProviderPill("\u2014", color = OpTextSecondary)
             }
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            "${d.provider} · ctx ${d.contextLength ?: "UNKNOWN"} · tools ${yn(d.supportsTools)} · " +
-                "vision ${yn(d.supportsVision)} · coding ${d.codingScore ?: "?"} · " +
-                "reasoning ${d.reasoningScore ?: "?"}",
-            color = OpTextSecondary,
+            modelMetadata(d),
             fontSize = 11.sp,
         )
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (connectionColor != OpRed) "\u25cf $connectionText" else "\u00d7 $connectionText",
+                "\u25cf $connectionText",
                 color = connectionColor,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.weight(1f))
-            Text(d.availability.name.replace('_', ' '), color = OpTextSecondary, fontSize = 10.sp)
+            Text(
+                availabilityLabel(d.availability),
+                color = if (d.availability == ModelAvailability.UNKNOWN) {
+                    OpTextSecondary.copy(alpha = 0.45f)
+                } else {
+                    OpTextSecondary
+                },
+                fontSize = 10.sp,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth()) {
+            if (d.kind == ModelKind.LOCAL) {
+                when {
+                    localLoaded -> Text(
+                        "Loaded",
+                        color = OpSuccess,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(top = 8.dp),
+                    )
+                    modelFileExists -> PillButton("Load", Modifier.weight(1f)) { onLoadLocal() }
+                    else -> Text(
+                        "No model file \u2014 download one below",
+                        color = OpTextSecondary,
+                        fontSize = 11.sp,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(top = 8.dp),
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+            }
+            PillButton("Change", Modifier.weight(1f)) { onChange() }
         }
     }
 }
 
+/** Metadata line: confirmed values in normal text, unfetched values dimmed. */
+private fun modelMetadata(d: ModelDescriptor): AnnotatedString {
+    val unknown = OpTextSecondary.copy(alpha = 0.45f)
+    val confirmed = OpTextSecondary
+    fun meta(label: String, text: String, isKnown: Boolean): AnnotatedString {
+        val base = AnnotatedString.Builder()
+        base.append("$label ")
+        base.withStyle(SpanStyle(color = if (isKnown) confirmed else unknown)) {
+            append(text)
+        }
+        base.append("  ")
+        return base.toAnnotatedString()
+    }
+    val builder = AnnotatedString.Builder()
+    builder.append("${d.provider} \u00b7 ")
+    builder.append(meta("ctx", d.contextLength?.toString() ?: "\u2014", d.contextLength != null))
+    val toolsKnown = d.kind != ModelKind.REMOTE || d.supportsTools
+    builder.append(meta("tools", if (d.supportsTools) "yes" else if (toolsKnown) "no" else "\u2014", toolsKnown))
+    val visionKnown = d.kind != ModelKind.REMOTE || d.supportsVision
+    builder.append(meta("vision", if (d.supportsVision) "yes" else if (visionKnown) "no" else "\u2014", visionKnown))
+    builder.append(meta("coding", d.codingScore?.toString() ?: "\u2014", d.codingScore != null))
+    builder.append(meta("reasoning", d.reasoningScore?.toString() ?: "\u2014", d.reasoningScore != null))
+    return builder.toAnnotatedString()
+}
+
+private fun availabilityLabel(a: ModelAvailability): String = when (a) {
+    ModelAvailability.AVAILABLE -> "Available"
+    ModelAvailability.LIMITED -> "Temporarily unavailable"
+    ModelAvailability.UNAVAILABLE -> "Offline"
+    ModelAvailability.UNKNOWN -> "UNKNOWN"
+}
+
 @Composable
-private fun ProviderPill(text: String, red: Boolean = false) {
+private fun ProviderPill(text: String, color: Color = OpTextSecondary) {
     Text(
         text = text,
-        color = if (red) OpText else OpTextSecondary,
+        color = color,
         fontSize = 10.sp,
         modifier = Modifier
             .padding(start = 6.dp)
@@ -922,7 +1159,6 @@ private fun HorizonLight(active: Boolean) {
     }
 }
 
-private fun yn(b: Boolean): String = if (b) "yes" else "no"
 
 private fun hasNetwork(context: Context): Boolean {
     val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
@@ -960,7 +1196,7 @@ private fun ApiKeyDialog(
                     visualTransformation = PasswordVisualTransformation(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = OpRed,
-                        unfocusedBorderColor = OpDivider,
+                        unfocusedBorderColor = OpBorder,
                         cursorColor = OpRed,
                     ),
                     modifier = Modifier.fillMaxWidth(),
@@ -1028,7 +1264,7 @@ private fun ModelDownloadDialog(
                     enabled = !downloading,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = OpRed,
-                        unfocusedBorderColor = OpDivider,
+                        unfocusedBorderColor = OpBorder,
                         cursorColor = OpRed,
                     ),
                     modifier = Modifier.fillMaxWidth(),

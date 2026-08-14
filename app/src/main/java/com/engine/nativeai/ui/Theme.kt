@@ -13,7 +13,10 @@ val OpCard = Color(0xFF1E1E1E)
 val OpText = Color(0xFFFFFFFF)
 val OpTextSecondary = Color(0xFFA0A0A0)
 val OpDivider = Color(0xFF2A2A2A)
+val OpBorder = Color(0xFF3A3A3A)
 val OpBlue = Color(0xFF008BFF)
+val OpAmber = Color(0xFFF5A623)
+val OpSuccess = Color(0xFF2ECC71)
 
 private val OpColors = darkColorScheme(
     primary = OpRed,

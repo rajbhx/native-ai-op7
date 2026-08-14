@@ -58,6 +58,7 @@ fun ModelPickerDialog(
     onSelect: (ModelDescriptor) -> Unit,
     onToggleFavorite: (String) -> Unit,
     onRefresh: () -> Unit,
+    onConfigure: ((ModelDescriptor) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -129,15 +130,21 @@ fun ModelPickerDialog(
                     val other = filtered.filter { it.kind == ModelKind.REMOTE && it.costTier != ModelCostTier.FREE }
                     if (free.isNotEmpty()) {
                         item { SectionHeader("FREE") }
-                        items(free) { ModelRow(it, selectedId, favorites, onSelect, onToggleFavorite) }
+                        items(free) {
+                            ModelRow(it, selectedId, favorites, onSelect, onToggleFavorite, onConfigure)
+                        }
                     }
                     if (local.isNotEmpty()) {
                         item { SectionHeader("LOCAL") }
-                        items(local) { ModelRow(it, selectedId, favorites, onSelect, onToggleFavorite) }
+                        items(local) {
+                            ModelRow(it, selectedId, favorites, onSelect, onToggleFavorite, onConfigure)
+                        }
                     }
                     if (other.isNotEmpty()) {
                         item { SectionHeader("OTHER") }
-                        items(other) { ModelRow(it, selectedId, favorites, onSelect, onToggleFavorite) }
+                        items(other) {
+                            ModelRow(it, selectedId, favorites, onSelect, onToggleFavorite, onConfigure)
+                        }
                     }
                     if (filtered.isEmpty()) {
                         item { Text("No models match.", color = OpTextSecondary, fontSize = 12.sp) }
@@ -203,6 +210,7 @@ private fun ModelRow(
     favorites: Set<String>,
     onSelect: (ModelDescriptor) -> Unit,
     onToggleFavorite: (String) -> Unit,
+    onConfigure: ((ModelDescriptor) -> Unit)?,
 ) {
     val selected = d.id == selectedId
     Row(
@@ -233,9 +241,19 @@ private fun ModelRow(
                 CapabilityChips(d)
             }
         }
+        if (d.kind == ModelKind.REMOTE && onConfigure != null) {
+            Text(
+                text = "Key",
+                color = OpTextSecondary,
+                fontSize = 10.sp,
+                modifier = Modifier
+                    .clickable { onConfigure(d) }
+                    .padding(horizontal = 6.dp, vertical = 8.dp),
+            )
+        }
         Text(
             text = if (favorites.contains(d.id)) "★" else "☆",
-            color = if (favorites.contains(d.id)) OpRed else OpTextSecondary,
+            color = if (favorites.contains(d.id)) OpAmber else OpTextSecondary,
             fontSize = 16.sp,
             modifier = Modifier
                 .clickable { onToggleFavorite(d.id) }
@@ -246,18 +264,18 @@ private fun ModelRow(
 
 @Composable
 private fun TierPill(tier: ModelCostTier) {
-    val (label, red) = when (tier) {
-        ModelCostTier.FREE -> "FREE" to true
-        ModelCostTier.PAID -> "PAID" to false
-        ModelCostTier.UNKNOWN -> "?" to false
+    val (label, color) = when (tier) {
+        ModelCostTier.FREE -> "FREE" to OpAmber
+        ModelCostTier.PAID -> "PAID" to OpTextSecondary
+        ModelCostTier.UNKNOWN -> "\u2014" to OpTextSecondary.copy(alpha = 0.45f)
     }
     Text(
         text = label,
-        color = if (red) OpText else OpTextSecondary,
+        color = color,
         fontSize = 9.sp,
         modifier = Modifier
             .padding(start = 6.dp)
-            .background(if (red) OpRed else OpDivider, RoundedCornerShape(10.dp))
+            .background(color.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
             .padding(horizontal = 6.dp, vertical = 1.dp),
     )
 }
@@ -268,7 +286,7 @@ private fun AvailabilityDot(availability: ModelAvailability) {
         ModelAvailability.AVAILABLE -> Color(0xFF2ECC71) to "Available"
         ModelAvailability.LIMITED -> Color(0xFFF39C12) to "Temporarily unavailable"
         ModelAvailability.UNAVAILABLE -> Color(0xFFE74C3C) to "Offline"
-        ModelAvailability.UNKNOWN -> OpDivider to "Unknown"
+        ModelAvailability.UNKNOWN -> OpTextSecondary.copy(alpha = 0.45f) to "Unknown"
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
