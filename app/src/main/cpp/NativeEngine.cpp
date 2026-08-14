@@ -1,6 +1,7 @@
 #include "NativeEngine.hpp"
 
 #include <android/log.h>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <unistd.h>
@@ -149,17 +150,31 @@ void NativeEngine::runGeneration(const std::string& prompt, int32_t max_tokens,
     }
     prompt_tokens.resize(n_prompt);
 
+    const auto t_start = std::chrono::steady_clock::now();
     llama_batch batch = llama_batch_get_one(prompt_tokens.data(), n_prompt);
     if (llama_decode(ctx_, batch) != 0) {
         return;
     }
+    const auto t_prompt_done = std::chrono::steady_clock::now();
 
     const llama_token eos = llama_vocab_eos(vocab_);
     const int32_t limit = max_tokens > 0 ? max_tokens : 128;
     char piece[64];
     int32_t generated = 0;
+    bool first_token_logged = false;
+    const auto t_gen_start = std::chrono::steady_clock::now();
     while (generated < limit && !cancel_.load()) {
         const llama_token id = llama_sampler_sample(sampler, ctx_, -1);
+        if (!first_token_logged) {
+            first_token_logged = true;
+            const auto t_first = std::chrono::steady_clock::now();
+            const auto prompt_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_prompt_done - t_start).count();
+            const auto first_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_first - t_gen_start).count();
+            __android_log_print(ANDROID_LOG_INFO, "NativeEnginePerf",
+                                "prompt_tokens=%d prompt_eval_ms=%lld first_token_ms=%lld",
+                                n_prompt, static_cast<long long>(prompt_ms),
+                                static_cast<long long>(first_ms));
+        }
         if (id == eos) {
             break;
         }
@@ -192,6 +207,14 @@ void NativeEngine::runGeneration(const std::string& prompt, int32_t max_tokens,
         }
     }
     generated_out = generated;
+    const auto t_done = std::chrono::steady_clock::now();
+    const auto gen_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_done - t_gen_start).count();
+    const auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_done - t_start).count();
+    const double tps = gen_ms > 0 ? (static_cast<double>(generated) * 1000.0) / static_cast<double>(gen_ms) : 0.0;
+    __android_log_print(
+        ANDROID_LOG_INFO, "NativeEnginePerf",
+        "generated_tokens=%d gen_ms=%lld total_ms=%lld tokens_per_sec=%.2f",
+        generated, static_cast<long long>(gen_ms), static_cast<long long>(total_ms), tps);
 }
 
 std::string NativeEngine::generate(const std::string& prompt, int32_t max_tokens) {

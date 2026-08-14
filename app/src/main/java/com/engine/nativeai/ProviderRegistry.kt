@@ -27,6 +27,10 @@ class ProviderRegistry {
         if (key.isNotBlank()) apiKeys[provider] = key
     }
 
+    fun clearApiKey(provider: String) {
+        apiKeys.remove(provider)
+    }
+
     fun lastRefresh(provider: String): Long = lastRefreshes[provider] ?: 0L
 
     fun setLastRefresh(provider: String, at: Long) {

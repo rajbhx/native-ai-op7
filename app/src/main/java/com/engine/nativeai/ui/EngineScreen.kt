@@ -27,6 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedTextField
@@ -47,6 +48,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -111,6 +113,9 @@ fun EngineScreen(
     var selectedModelId by remember { mutableStateOf(prefs.lastSelectedModelId ?: "local-llama") }
     var favorites by remember { mutableStateOf(prefs.favorites()) }
     var showPicker by remember { mutableStateOf(false) }
+    var showKeyDialog by remember { mutableStateOf(false) }
+    var keyProviderId by remember { mutableStateOf<String?>(null) }
+    var keyInput by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         // Refresh the catalog once on first launch (cached metadata is used
@@ -307,6 +312,24 @@ fun EngineScreen(
         }
         Spacer(Modifier.height(6.dp))
         models.filter { it.id == selectedModelId }.forEach { ModelCard(it) }
+        models.firstOrNull { it.id == selectedModelId && it.kind == ModelKind.REMOTE }?.let { d ->
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val keySet = providerRegistry.apiKey(d.provider).isNotBlank()
+                Text(
+                    "API key (${d.provider}): ${if (keySet) "set (memory only)" else "not set"}",
+                    color = if (keySet) OpText else OpRed,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                PillButton(if (keySet) "Change" else "Enter") {
+                    keyProviderId = d.provider
+                    keyInput = providerRegistry.apiKey(d.provider)
+                    showKeyDialog = true
+                }
+            }
+        }
         Spacer(Modifier.height(4.dp))
         if (showPicker) {
             ModelPickerDialog(
@@ -336,6 +359,33 @@ fun EngineScreen(
                     }
                 },
                 onDismiss = { showPicker = false },
+            )
+        }
+
+        if (showKeyDialog && keyProviderId != null) {
+            ApiKeyDialog(
+                provider = keyProviderId!!,
+                initial = keyInput,
+                onSave = { key ->
+                    providerRegistry.setApiKey(keyProviderId!!, key.trim())
+                    // Recreate the live provider so the running agent picks up the new key.
+                    models.firstOrNull { it.provider == keyProviderId }?.let { d ->
+                        registry.remove(d.id)
+                        ensureRemoteProvider(registry, providerRegistry, prefs, d)
+                    }
+                    showKeyDialog = false
+                    status = "API key set for ${keyProviderId} (memory only, never persisted)"
+                },
+                onClear = {
+                    providerRegistry.clearApiKey(keyProviderId!!)
+                    models.firstOrNull { it.provider == keyProviderId }?.let { d ->
+                        registry.remove(d.id)
+                        ensureRemoteProvider(registry, providerRegistry, prefs, d)
+                    }
+                    showKeyDialog = false
+                    status = "API key cleared for ${keyProviderId}"
+                },
+                onDismiss = { showKeyDialog = false },
             )
         }
 
@@ -621,4 +671,56 @@ private fun hasNetwork(context: Context): Boolean {
     val network = cm.activeNetwork ?: return false
     val caps = cm.getNetworkCapabilities(network) ?: return false
     return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+}
+
+@Composable
+private fun ApiKeyDialog(
+    provider: String,
+    initial: String,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var value by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("API key · $provider", color = OpText) },
+        text = {
+            Column {
+                Text(
+                    "Entered keys live only in memory for this session. They are never persisted, logged, or uploaded anywhere.",
+                    color = OpTextSecondary,
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it },
+                    label = { Text("Bearer token") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = OpRed,
+                        unfocusedBorderColor = OpDivider,
+                        cursorColor = OpRed,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSave(value) }, enabled = value.isNotBlank()) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            Row {
+                if (initial.isNotBlank()) {
+                    Button(onClick = onClear) { Text("Clear") }
+                    Spacer(Modifier.width(8.dp))
+                }
+                Button(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
 }
