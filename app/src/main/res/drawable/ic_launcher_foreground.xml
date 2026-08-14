@@ -1,0 +1,28 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- simple neural-node glyph: four nodes + links -->
+    <path
+        android:pathData="M34,54 L54,34 L74,54 L54,74 Z"
+        android:strokeColor="#4CC2FF"
+        android:strokeWidth="3"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M54,54 L54,74 M54,54 L74,54 M54,54 L34,54 M54,54 L54,34"
+        android:strokeColor="#4CC2FF"
+        android:strokeWidth="3" />
+    <path
+        android:pathData="M34,54 m-6,0 a6,6 0 1,1 12,0 a6,6 0 1,1 -12,0"
+        android:fillColor="#4CC2FF" />
+    <path
+        android:pathData="M74,54 m-6,0 a6,6 0 1,1 12,0 a6,6 0 1,1 -12,0"
+        android:fillColor="#4CC2FF" />
+    <path
+        android:pathData="M54,34 m-6,0 a6,6 0 1,1 12,0 a6,6 0 1,1 -12,0"
+        android:fillColor="#4CC2FF" />
+    <path
+        android:pathData="M54,74 m-6,0 a6,6 0 1,1 12,0 a6,6 0 1,1 -12,0"
+        android:fillColor="#4CC2FF" />
+</vector>
