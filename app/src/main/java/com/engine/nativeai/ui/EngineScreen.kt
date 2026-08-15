@@ -195,6 +195,12 @@ fun EngineScreen(
     var favorites by remember { mutableStateOf(prefs.favorites()) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     var runJob by remember { mutableStateOf<Job?>(null) }
+
+    // Mirror agent activity into the service lifecycle (Phase A4): the
+    // service applies its own transition rules, the UI only reports events.
+    LaunchedEffect(running) {
+        EngineForegroundService.reportBusy(running)
+    }
     var showPicker by remember { mutableStateOf(false) }
     var showKeyDialog by remember { mutableStateOf(false) }
     var keyProviderId by remember { mutableStateOf<String?>(null) }
@@ -208,7 +214,7 @@ fun EngineScreen(
     var healthStatus by remember { mutableStateOf("") }
     var healthRunning by remember { mutableStateOf(false) }
     var lastHealthMs by remember { mutableStateOf(0L) }
-    val executionManager = remember { ExecutionManager(context) }
+    val executionManager = remember { ExecutionManager.shared(context) }
     // One construction path for tools + sources (core-hardening C1): the
     // sheet inventory, the agent and the startup refresh share this instance.
     val toolbox = remember { Toolbox(context, engine, registry, prefs, executionManager) }
@@ -1091,6 +1097,11 @@ fun EngineScreen(
                         showDownloadDialog = true
                     }
                 }
+                Text(
+                    "Service \u00b7 ${serviceState.name}",
+                    color = if (serviceState == EngineServiceState.ERROR) OpAmber else OpTextSecondary,
+                    fontSize = 10.sp,
+                )
                 Spacer(Modifier.height(8.dp))
                 PillButton("Stats", Modifier.fillMaxWidth(), enabled = !running) {
                     scope.launch {

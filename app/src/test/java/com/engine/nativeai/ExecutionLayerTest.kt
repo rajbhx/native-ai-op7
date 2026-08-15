@@ -1,5 +1,6 @@
 package com.engine.nativeai
 
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -23,6 +24,22 @@ class ExecutionLayerTest {
     fun localBackendReportsNonZeroExit() = runBlocking {
         val r = LocalProcessBackend().execute(ExecutionRequest(command = "exit 3"))
         assertEquals(3, r.exitCode)
+    }
+
+    @Test
+    fun shutdownDestroysManagedProcesses() = runBlocking {
+        val backend = LocalProcessBackend()
+        val deferred = async {
+            backend.execute(ExecutionRequest(command = "exec sleep 60", timeoutMs = 30_000))
+        }
+        delay(400)
+        backend.shutdown()
+        val r = deferred.await()
+        assertTrue(
+            "expected killed process, got exit=${r.exitCode} timedOut=${r.timedOut}",
+            r.exitCode != 0,
+        )
+        assertFalse(r.timedOut)
     }
 
     @Test
