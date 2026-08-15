@@ -36,6 +36,18 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Restore persistent debug keystore (same signature across builds)
+        run: |
+          if [ -n "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" ]; then
+            mkdir -p ~/.android
+            echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+            keytool -list -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey >/dev/null \
+              || { echo "::error::restored debug keystore failed keytool validation"; exit 1; }
+            echo "restored persistent debug keystore"
+          else
+            echo "DEBUG_KEYSTORE_BASE64 not set - AGP generates a fresh keystore (installs will wipe app data)"
+          fi
+
       - name: Build debug APK (arm64-v8a only)
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
