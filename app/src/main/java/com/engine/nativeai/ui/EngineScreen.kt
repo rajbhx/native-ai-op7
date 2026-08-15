@@ -1418,6 +1418,7 @@ private fun runAgent(
             networkAvailable = hasNetwork(context),
             preferredId = preferredId,
             systemPromptOverride = prefs.systemPromptOverride,
+            sourceSearch = toolbox.sourceSearch,
         )
         val sessionId = try {
             val id = memory.startSession("agent: ${prompt.take(60)}")

@@ -19,7 +19,13 @@ enum class ModelCapability {
 /** Task classification produced by TaskClassifier (spec §7). */
 enum class TaskType {
     CHAT, RESEARCH, CODING, DEBUGGING, REASONING, SUMMARIZATION,
-    DOCUMENT_ANALYSIS, TOOL_EXECUTION, VISION, LONG_CONTEXT, OFFLINE_TASK,
+    DOCUMENT_ANALYSIS, TOOL_EXECUTION, VISION, LONG_CONTEXT, OFFLINE_TASK;
+
+    /** Knowledge-seeking tasks are augmented with local source-KB hits (roadmap Phase 6). */
+    fun consultsSources(): Boolean = when (this) {
+        RESEARCH, SUMMARIZATION, DOCUMENT_ANALYSIS, DEBUGGING, CODING -> true
+        else -> false
+    }
 }
 
 /** Routing preference (spec §8-10, §20). */

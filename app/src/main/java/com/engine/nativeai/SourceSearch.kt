@@ -11,3 +11,9 @@ class SourceSearch(private val db: SourceStore) {
             if (query.isBlank()) emptyList() else db.searchSources(query.trim(), limit)
         }
 }
+
+/** [source/file] citations for the hybrid agent context (roadmap Phase 6). */
+fun formatSourceHits(hits: List<SourceSearchHit>): String =
+    hits.joinToString("\n\n") {
+        "[${it.sourceTitle}/${it.filePath}] ${it.content.trim().take(400)}"
+    }

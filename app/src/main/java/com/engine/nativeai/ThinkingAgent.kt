@@ -28,6 +28,7 @@ class ThinkingAgent(
     private val preferLocal: Boolean = false,
     private val preferredId: String? = null,
     private val systemPromptOverride: String? = null,
+    private val sourceSearch: SourceSearch? = null,
 ) {
     fun run(
         userPrompt: String,
@@ -71,6 +72,17 @@ class ThinkingAgent(
                 if (descriptor.kind == ModelKind.REMOTE) MemoryPrivacyFilter.forRemote(it) else it
             }
 
+            // Hybrid context (roadmap Phase 6): top source-KB hits join memory
+            // for knowledge-seeking tasks. Source KB is user-supplied knowledge
+            // (not the private memory DB), so no remote privacy filter applies.
+            val sourceCtx = if (sourceSearch != null && taskType.consultsSources()) {
+                try {
+                    formatSourceHits(withContext(Dispatchers.IO) { sourceSearch.search(userPrompt, 3) })
+                } catch (e: Exception) {
+                    "" // source lookup failure must never kill the agent loop
+                }
+            } else ""
+
             state = AgentState.PLAN
             emit(AgentEvent.Stage(state))
 
@@ -89,7 +101,7 @@ class ThinkingAgent(
                 } else {
                     memoryCtx
                 }
-                val userCtx = contextManager.build("", userPrompt, ctx, observations)
+                val userCtx = contextManager.build("", userPrompt, ctx, observations, sources = sourceCtx)
                 val request = ModelRequest(
                     system = systemPromptOverride ?: systemPrompt(),
                     prompt = ContextAdapter.fit(userCtx.trim(), descriptor.contextLength ?: 2048),

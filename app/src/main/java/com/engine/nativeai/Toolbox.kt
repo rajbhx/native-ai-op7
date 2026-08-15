@@ -18,6 +18,7 @@ class Toolbox(
     val sources: SourceRegistry = SourceRegistry(memory).apply {
         seed(SourceSeedLoader(context).load()) // uBO-style default catalog, first-run only
     }
+    val sourceSearch: SourceSearch = SourceSearch(memory)
     val sourceUpdater: SourceUpdater = SourceUpdater(
         sources,
         memory,
@@ -33,7 +34,7 @@ class Toolbox(
         register(WebSearchTool(LocalFallbackProvider()))
         register(FileSearchTool(context.filesDir))
         register(ModelInfoTool(registry))
-        register(SourceSearchTool(SourceSearch(memory)))
+        register(SourceSearchTool(sourceSearch))
         register(FinalAnswerTool())
         register(
             TerminalTool(
