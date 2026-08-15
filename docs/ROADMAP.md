@@ -61,8 +61,14 @@ One measured optimization per revision; never fabricate capabilities.
 ## Phase 7 — Benchmarking + optimization ⬜ (current focus)
 - On-device sweep: 2–6 threads × n_gpu_layers, sustained tok/s as primary
   metric; decide any GGML flag/`-march` changes only from measured data.
-- ⬜ `InferenceBackend` abstraction; Vulkan/NNAPI toggles shown only when
-  present on device, default off (no fake acceleration).
+- ✅ `InferenceBackend` abstraction (S6): `RuntimeKind` on `ModelDescriptor`,
+  `MnnBackend` dlopen probe over a CI-bundled libMNN.so 3.6.1 (real backend,
+  honest availability). ⬜ Vulkan/NNAPI toggles still gated on the Phase-7
+  benchmark sweep; MNN model inference ships only after the same gate.
+- ✅ USearch HNSW vector index (S7): vendored headers, dedicated vector-lib,
+  `USearchVectorIndex` (bounded/persisted) + `EmbeddingProvider` seam;
+  hybrid BM25+HNSW source search stays dormant until a benchmark-validated
+  embedder exists (no fake capabilities).
 - Memory monitor vs measured 1B envelope (KV 12.75 MiB, compute 302 MiB,
   RSS ~729 MB — docs/source-research/op7-memory-audit.md).
 - Observability increment ✅: RuntimeMetrics (load/first-token/tok-s/tools/
@@ -102,3 +108,19 @@ One measured optimization per revision; never fabricate capabilities.
 UI works · runtime/model state correct · errors translated · memory within
 budget · offline behavior preserved · architecture modular · no fake
 capabilities · tests/build pass · measured on device.
+
+## Phase 9 — Source knowledge base + runtime layer 🟡 (track C)
+- ✅ S4 seed catalog (uBlock Origin, MemPalace, Termux, llama.cpp, LiteRT,
+  playbook) — uBO update-after-hours model, idempotent first-run seeding.
+- ✅ S2 GitHub rate-limit visibility (403/429 → clear error, honest state).
+- ✅ S1 DOCUMENT ingestion via Termux `pdftotext`; explicit error when the
+  extractor is unavailable (metadata-only, no fabricated capability).
+- ✅ S3 startup auto-refresh: bounded, online-only, never blocks the UI.
+- ✅ S5 hybrid agent context: top-3 source hits with [source/file] citations
+  for knowledge-seeking tasks (ContextManager sources slot; compression
+  order obs → memory → sources → user; system prompt untouched).
+- ✅ S6 MNN runtime probe + S7 USearch vector index (see Phase 7).
+- ⬜ On-device benchmark gate → MNN embedder/intent model + vector hybrid
+  search + embedding-backed memory (Phase 2 vector retrieval reopens).
+- ⬜ On-device UI verification: Sources rows, DOCUMENT add, startup refresh,
+  model-card runtime badge, Diagnostics MNN/VECT lines, hybrid citations.

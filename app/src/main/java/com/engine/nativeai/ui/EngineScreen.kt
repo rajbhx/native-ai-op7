@@ -1262,7 +1262,7 @@ private fun DiagnosticsDialog(
     onClear: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val lines = (snapshot?.let { snap ->
+    val lines = snapshot?.let { snap ->
         val m = snap.metrics
         val toolsLine = if (m.tools.isEmpty()) {
             "none"
