@@ -94,7 +94,9 @@ class SourceUpdater(
         val owner = s.owner ?: throw IllegalStateException("github source missing owner")
         val repo = s.repo ?: throw IllegalStateException("github source missing repo")
         val apiBase = "https://api.github.com/repos/$owner/$repo"
-        val commits = fetcher.fetch("$apiBase/commits?per_page=1").body?.toString(Charsets.UTF_8)
+        val commitsResp = fetcher.fetch("$apiBase/commits?per_page=1")
+        requireNotRateLimited(commitsResp, "commits")
+        val commits = commitsResp.body?.toString(Charsets.UTF_8)
             ?: throw IllegalStateException("no commits response")
         val sha = GithubTreeParser.latestCommitSha(commits)
             ?: throw IllegalStateException("no commit sha in response")
@@ -103,8 +105,10 @@ class SourceUpdater(
             db.touchSourceWrite(s.id, sha, null, null, SourceStatus.INDEXED, s.fileCount, s.sizeBytes)
             return 0L
         }
-        val treeBody = fetcher.fetch("$apiBase/git/trees/$sha?recursive=1")
-            .body?.toString(Charsets.UTF_8) ?: throw IllegalStateException("no tree response")
+        val treeResp = fetcher.fetch("$apiBase/git/trees/$sha?recursive=1")
+        requireNotRateLimited(treeResp, "tree")
+        val treeBody = treeResp.body?.toString(Charsets.UTF_8)
+            ?: throw IllegalStateException("no tree response")
         val entries = GithubTreeParser.parseTree(treeBody)
             .filter { it.size <= SourceCapabilities.MAX_FILE_BYTES }
             .take(SourceCapabilities.MAX_FILES_PER_SOURCE)
@@ -181,8 +185,19 @@ class SourceUpdater(
         return f.length()
     }
 
+    private fun requireNotRateLimited(resp: FetchResponse, what: String) {
+        if (resp.rateLimited && (resp.rateLimitRemaining == null || resp.rateLimitRemaining == 0L)) {
+            throw IllegalStateException(GITHUB_RATE_LIMIT_MESSAGE)
+        }
+        if (resp.status !in 200..299) throw IllegalStateException("HTTP ${resp.status} for $what")
+    }
+
     private companion object {
         /** Per-run cap; protects battery on the 855 while keeping repos fresh. */
         const val MAX_BUDGET_BYTES = 16L * 1024 * 1024
+
+        /** Anonymous GitHub cap: 60 req/hr (no token path this phase). */
+        const val GITHUB_RATE_LIMIT_MESSAGE =
+            "GitHub API rate limit reached (60/hr anonymous) \u2014 retry later"
     }
 }

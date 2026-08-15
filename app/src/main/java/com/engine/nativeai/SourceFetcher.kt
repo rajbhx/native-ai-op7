@@ -11,8 +11,11 @@ data class FetchResponse(
     val body: ByteArray?,
     val etag: String? = null,
     val lastModified: String? = null,
+    val rateLimitRemaining: Long? = null,
+    val rateLimitReset: Long? = null,
 ) {
     val notModified: Boolean get() = status == 304
+    val rateLimited: Boolean get() = status == 403 || status == 429
 }
 
 interface SourceFetcher {
@@ -37,13 +40,17 @@ class HttpSourceFetcher(
                 val status = conn.responseCode
                 val etag = conn.getHeaderField("ETag")
                 val lm = conn.getHeaderField("Last-Modified")
-                if (status == 304) return@withContext FetchResponse(304, null, etag, lm)
+                val rlRemaining = conn.getHeaderField("X-RateLimit-Remaining")?.toLongOrNull()
+                val rlReset = conn.getHeaderField("X-RateLimit-Reset")?.toLongOrNull()
+                if (status == 304) {
+                    return@withContext FetchResponse(304, null, etag, lm, rlRemaining, rlReset)
+                }
                 if (status !in 200..299) {
                     conn.errorStream?.close()
-                    return@withContext FetchResponse(status, null, etag, lm)
+                    return@withContext FetchResponse(status, null, etag, lm, rlRemaining, rlReset)
                 }
                 val body = conn.inputStream.use { it.readBytes() }
-                FetchResponse(status, body, etag, lm)
+                FetchResponse(status, body, etag, lm, rlRemaining, rlReset)
             } finally {
                 conn.disconnect()
             }

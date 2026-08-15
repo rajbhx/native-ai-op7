@@ -74,6 +74,58 @@ class SourceUpdaterTest {
     }
 
     @Test
+    fun githubRateLimit403MarksSourceErrorWithClearMessage() = runBlocking {
+        val store = FakeSourceStore()
+        store.saveSource(
+            Source(0, 1, "Repo", SourceType.GITHUB_REPO, owner = "o", repo = "r",
+                writeTime = now - 48 * hour, updateAfterHours = 24),
+        )
+        val fetcher = FakeFetcher()
+        fetcher.responses["https://api.github.com/repos/o/r/commits?per_page=1"] =
+            FetchResponse(403, null, rateLimitRemaining = 0L, rateLimitReset = 1_800_360_000L)
+        val updater = SourceUpdater(SourceRegistry(store), store, fetcher)
+
+        val report = updater.updateOnce(now)
+
+        assertEquals(1, report.failed)
+        assertEquals(SourceStatus.ERROR, store.sourceById(1)!!.status)
+        assertTrue(store.sourceById(1)!!.error!!.contains("rate limit"))
+    }
+
+    @Test
+    fun github429IsRateLimited() = runBlocking {
+        val store = FakeSourceStore()
+        store.saveSource(
+            Source(0, 1, "Repo", SourceType.GITHUB_REPO, owner = "o", repo = "r",
+                writeTime = now - 48 * hour, updateAfterHours = 24),
+        )
+        val fetcher = FakeFetcher()
+        fetcher.responses["https://api.github.com/repos/o/r/commits?per_page=1"] =
+            FetchResponse(429, null)
+        val updater = SourceUpdater(SourceRegistry(store), store, fetcher)
+
+        assertEquals(1, updater.updateOnce(now).failed)
+        assertTrue(store.sourceById(1)!!.error!!.contains("rate limit"))
+    }
+
+    @Test
+    fun nonRateLimit403IsNotMisreported() = runBlocking {
+        val store = FakeSourceStore()
+        store.saveSource(
+            Source(0, 1, "Repo", SourceType.GITHUB_REPO, owner = "o", repo = "r",
+                writeTime = now - 48 * hour, updateAfterHours = 24),
+        )
+        val fetcher = FakeFetcher()
+        fetcher.responses["https://api.github.com/repos/o/r/commits?per_page=1"] =
+            FetchResponse(403, null, rateLimitRemaining = 50L)
+        val updater = SourceUpdater(SourceRegistry(store), store, fetcher)
+
+        updater.updateOnce(now)
+        // Remaining > 0 => not the anonymous cap; error must not claim rate limit.
+        assertTrue(store.sourceById(1)!!.error!!.contains("HTTP 403"))
+    }
+
+    @Test
     fun stoppedUpdateBreaksLoopEarly() = runBlocking {
         val store = FakeSourceStore()
         store.saveSource(Source(0, 1, "a", SourceType.RAW_TEXT, writeTime = now - 48 * hour, updateAfterHours = 24))
