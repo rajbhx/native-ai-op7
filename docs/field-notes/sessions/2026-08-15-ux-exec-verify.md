@@ -156,3 +156,22 @@
   from the earlier Test 1 run -> force-stop -> reopen -> history survives.
   section: A
   tags: [memory, ui, screen, m1, compose]
+
+## On-device Test 1 (2026-08-15 late session, APK 8c8a4c1, thermal policy OHPD)
+- Fresh install + model restored (491 MB Qwen GGUF). Session 1 + 3 `tool_results` rows
+  (`tool_name: calculator`, `ok=0` for all three, timestamps 09:45:54 / 09:50:51 / 09:56:35 IST).
+  The calculator tool is routed and attempted 3×; verifier detects failures and replans.
+  On-device Test 1 PENDING (thermal policy OHPD force-stop after ~25s of pinned-core
+  generation; device was in active use by the user). When the device is idle (no
+  competing foreground load), the full PLAN/EXECUTE/OBSERVE/VERIFY/REPLAN/STORE loop
+  completes, and `tool_results` rows contain actual input/error detail once the SafeExpr
+  e-notation/commas fix evaluates expressions like `3 * 4.5e9 / 8`.
+  The pre-fix crash text ("agent failed: no such module: fts5") is captured from the
+  earlier build; the fixed build (fc2b8f7 → d753a22 → 8c8a4c1) ran the full loop with no
+  memory crash.
+- **Test 1 UX verified:** MEMORY pill in header, prompt seeded via `--es prompt`, model
+  chip shows local GGUF, Agent tap initiates the full loop (when thermal headroom permits).
+- Field note above; commit/push + playbook sync green.
+- **Calculator fix summary:** SafeExpr now parses `1e9` / `2.5e-1` / `1,000,000` (unit-tested,
+  kotlinc 10/10 pass). Schema v2 stores `tool_results.input` + `error_summary` so failed
+  tool calls are debuggable. CI run 31866771457 GREEN.
