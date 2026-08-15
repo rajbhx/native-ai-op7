@@ -20,6 +20,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+/** Single authoritative engine-service state for the UI (Track A R3). */
+enum class EngineServiceState {
+    STOPPED, STARTING, READY, BUSY, ERROR,
+}
+
 /**
  * Phase 4 spec — LMK protection & background engine (original spec Phase 4).
  *
@@ -139,11 +144,6 @@ class EngineForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "native_ai_engine"
         private const val NOTIFICATION_ID = 1001
-
-        /** Single authoritative engine-service state for the UI (Track A R3). */
-        enum class EngineServiceState {
-            STOPPED, STARTING, READY, BUSY, ERROR,
-        }
 
         private val _state = MutableStateFlow(EngineServiceState.STOPPED)
         val state: StateFlow<EngineServiceState> = _state.asStateFlow()

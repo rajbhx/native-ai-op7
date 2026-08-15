@@ -78,6 +78,7 @@ import com.engine.nativeai.AgentTask
 import com.engine.nativeai.CalculatorTool
 import com.engine.nativeai.EngineForegroundService
 import com.engine.nativeai.EngineConfig
+import com.engine.nativeai.EngineServiceState
 import com.engine.nativeai.FileSearchTool
 import com.engine.nativeai.FinalAnswerTool
 import com.engine.nativeai.GenerationConfig
@@ -148,7 +149,7 @@ fun EngineScreen(
     var running by remember { mutableStateOf(false) }
     var traceExpanded by remember { mutableStateOf(true) }
     val serviceState by EngineForegroundService.state.collectAsState()
-    val serviceRunning = serviceState != EngineForegroundService.EngineServiceState.STOPPED
+    val serviceRunning = serviceState != EngineServiceState.STOPPED
     var engineState by remember { mutableStateOf(EngineUiState.READY) }
     var selectedMode by remember { mutableStateOf(modeIndexFor(prefs.routingMode)) }
     var selectedModelId by remember {
