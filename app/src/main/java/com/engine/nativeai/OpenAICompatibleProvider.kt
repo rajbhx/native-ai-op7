@@ -3,7 +3,9 @@ package com.engine.nativeai
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -30,16 +32,20 @@ class OpenAICompatibleProvider(
 
     private val baseUrl: String = descriptor.endpoint.trimEnd('/')
 
-    override fun stream(request: ModelRequest): Flow<ModelStreamEvent> = flow {
-        withContext(Dispatchers.IO) {
+    override fun stream(request: ModelRequest): Flow<ModelStreamEvent> {
+        // Emission context discipline (kotlinx.coroutines 1.8): emissions must
+        // stay in the flow's own context. Network IO therefore moves out of the
+        // builder via flowOn, never via withContext (withContext + emit inside a
+        // builder triggers FlowExceptionTransparencyViolatedException), and
+        // failures become events through the catch operator.
+        val core = flow {
             val conn = openConnection(stream = true)
             try {
                 writeBody(conn, request, stream = true)
                 val code = conn.responseCode
                 if (code !in 200..299) {
                     val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $code"
-                    emit(ModelStreamEvent.Error(friendlyError(code, err)))
-                    return@withContext
+                    throw IllegalStateException(friendlyError(code, err))
                 }
                 val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
                 var done = false
@@ -62,20 +68,16 @@ class OpenAICompatibleProvider(
                                 emit(ModelStreamEvent.Reasoning(event.reasoning))
                             }
                         }
-                        is SseError -> {
-                            emit(ModelStreamEvent.Error(event.message))
-                            done = true
-                        }
+                        is SseError -> throw IllegalStateException(event.message)
                         null -> { /* ignore unknown shapes */ }
                     }
                 }
                 emit(ModelStreamEvent.Done(tokens))
-            } catch (e: Exception) {
-                emit(ModelStreamEvent.Error(e.message ?: "stream failed"))
             } finally {
                 conn.disconnect()
             }
-        }
+        }.flowOn(Dispatchers.IO)
+        return core.catch { e -> emit(ModelStreamEvent.Error(e.message ?: "stream failed")) }
     }
 
     override suspend fun complete(request: ModelRequest): ModelResult =
