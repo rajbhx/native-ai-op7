@@ -304,6 +304,18 @@ fun SourcesScreen(onBack: () -> Unit) {
                     showAdd = false
                 }
             },
+            onAddDocument = { title, urlOrPath, collection ->
+                scope.launch {
+                    val colId = withContext(Dispatchers.IO) { db.upsertSourceCollection(collection) }
+                    val id = withContext(Dispatchers.IO) {
+                        registry.addSource(
+                            Source(0, colId, title, SourceType.DOCUMENT, contentUrl = urlOrPath),
+                        )
+                    }
+                    refreshOne(id)
+                    showAdd = false
+                }
+            },
         )
     }
 }
@@ -411,6 +423,7 @@ private fun AddSourceDialog(
     onAddUrl: (String, String, String) -> Unit,
     onAddText: (String, String, String) -> Unit,
     onAddLocal: (String, String, String) -> Unit,
+    onAddDocument: (String, String, String) -> Unit,
 ) {
     var kind by remember { mutableStateOf(SourceType.GITHUB_REPO) }
     var title by remember { mutableStateOf("") }
@@ -426,7 +439,7 @@ private fun AddSourceDialog(
         SourceType.WEB_PAGE -> title.isNotBlank() && url.startsWith("http")
         SourceType.RAW_TEXT -> title.isNotBlank() && text.isNotBlank()
         SourceType.LOCAL_FILE -> title.isNotBlank() && path.isNotBlank()
-        SourceType.DOCUMENT -> false
+        SourceType.DOCUMENT -> title.isNotBlank() && url.isNotBlank()
     }
 
     AlertDialog(
@@ -436,7 +449,7 @@ private fun AddSourceDialog(
         text = {
             Column {
                 Row {
-                    listOf(SourceType.GITHUB_REPO, SourceType.WEB_PAGE, SourceType.RAW_TEXT, SourceType.LOCAL_FILE)
+                    listOf(SourceType.GITHUB_REPO, SourceType.WEB_PAGE, SourceType.RAW_TEXT, SourceType.LOCAL_FILE, SourceType.DOCUMENT)
                         .forEach { t ->
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -479,7 +492,11 @@ private fun AddSourceDialog(
                     SourceType.LOCAL_FILE -> {
                         OutlinedTextField(value = path, onValueChange = { path = it }, label = { Text("/sdcard/… absolute path", color = OpTextSecondary) }, singleLine = true, colors = fieldColors(), modifier = Modifier.fillMaxWidth())
                     }
-                    SourceType.DOCUMENT -> Unit
+                    SourceType.DOCUMENT -> {
+                        OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("https://…pdf or /sdcard/…path", color = OpTextSecondary) }, singleLine = true, colors = fieldColors(), modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(4.dp))
+                        Text("PDF text extraction needs Termux + pdftotext (termux install poppler); otherwise the source stays metadata-only.", color = OpTextSecondary, fontSize = 10.sp)
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(value = collection, onValueChange = { collection = it }, label = { Text("Collection", color = OpTextSecondary) }, singleLine = true, colors = fieldColors(), modifier = Modifier.fillMaxWidth())
@@ -499,7 +516,7 @@ private fun AddSourceDialog(
                         SourceType.WEB_PAGE -> onAddUrl(title.trim(), url.trim(), collection.trim())
                         SourceType.RAW_TEXT -> onAddText(title.trim(), text, collection.trim())
                         SourceType.LOCAL_FILE -> onAddLocal(title.trim(), path.trim(), collection.trim())
-                        SourceType.DOCUMENT -> Unit
+                        SourceType.DOCUMENT -> onAddDocument(title.trim(), url.trim(), collection.trim())
                     }
                 },
                 enabled = canSubmit(),
@@ -527,7 +544,7 @@ private fun typeLine(s: Source): String = when (s.type) {
     SourceType.WEB_PAGE -> "WEB \u00b7 ${s.contentUrl ?: "?"}"
     SourceType.RAW_TEXT -> "TEXT"
     SourceType.LOCAL_FILE -> "LOCAL \u00b7 ${s.contentUrl ?: "?"}"
-    SourceType.DOCUMENT -> "DOCUMENT"
+    SourceType.DOCUMENT -> "DOCUMENT \u00b7 ${s.contentUrl ?: "?"}"
 }
 
 private fun ago(ts: Long): String {

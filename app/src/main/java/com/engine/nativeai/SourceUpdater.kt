@@ -12,6 +12,7 @@ class SourceUpdater(
     private val registry: SourceRegistry,
     private val db: SourceStore,
     private val fetcher: SourceFetcher = HttpSourceFetcher(),
+    private val textExtractor: DocumentTextExtractor? = null,
 ) {
     data class UpdateReport(
         val skippedBusy: Boolean = false,
@@ -80,7 +81,7 @@ class SourceUpdater(
                 // RAW_TEXT is indexed directly on add (no remote refresh).
                 SourceType.RAW_TEXT -> 0L
                 SourceType.LOCAL_FILE -> updateLocalFile(s, budgetBytes)
-                SourceType.DOCUMENT -> 0L // metadata-only for now (ADR-007: text extraction deferred)
+                SourceType.DOCUMENT -> updateDocument(s, budgetBytes)
             }
             registry.touchRead(s.id)
             spent
@@ -161,6 +162,45 @@ class SourceUpdater(
         db.replaceSourceChunks(s.id, fileId, chunks)
         db.touchSourceWrite(s.id, null, resp.etag, resp.lastModified, SourceStatus.INDEXED, 1, body.size.toLong())
         return body.size.toLong()
+    }
+
+    private suspend fun updateDocument(s: Source, budgetBytes: Long): Long {
+        val extractor = textExtractor
+        if (extractor == null || !extractor.available) {
+            throw IllegalStateException(
+                "document text extraction unavailable (Termux + pdftotext required)",
+            )
+        }
+        val url = s.contentUrl ?: throw IllegalStateException("document source missing path/url")
+        val bytes = if (url.startsWith("http://") || url.startsWith("https://")) {
+            val resp = fetcher.fetch(url)
+            if (resp.status !in 200..299) throw IllegalStateException("HTTP ${resp.status} for $url")
+            resp.body ?: throw IllegalStateException("empty document body")
+        } else {
+            val f = File(url)
+            if (!f.exists()) throw IllegalStateException("file not found: $url")
+            if (!f.isFile) throw IllegalStateException("not a file: $url")
+            f.readBytes()
+        }
+        if (bytes.size > SourceCapabilities.MAX_FILE_BYTES) {
+            throw IllegalStateException("document too large (max ${SourceCapabilities.MAX_FILE_BYTES / 1024} KB)")
+        }
+        val marker = "doc-${s.id}-${bytes.size}"
+        val existing = db.sourceFiles(s.id).firstOrNull()
+        if (existing?.blobSha == marker) {
+            db.touchSourceWrite(s.id, marker, null, null, SourceStatus.INDEXED, 1, bytes.size.toLong())
+            return 0L
+        }
+        val text = extractor.extractPdf(bytes, "doc-${s.id}.pdf")
+            ?: throw IllegalStateException("pdftotext produced no text (Termux + storage access required)")
+        if (text.isBlank()) throw IllegalStateException("document yielded no text")
+        val chunks = SourceChunker.chunk(text)
+        val fileId = db.upsertSourceFile(
+            SourceFile(id = 0, sourceId = s.id, path = "root", blobSha = marker, sizeBytes = bytes.size.toLong()),
+        )
+        db.replaceSourceChunks(s.id, fileId, chunks)
+        db.touchSourceWrite(s.id, marker, null, null, SourceStatus.INDEXED, 1, bytes.size.toLong())
+        return text.length.toLong()
     }
 
     private suspend fun updateLocalFile(s: Source, budgetBytes: Long): Long {

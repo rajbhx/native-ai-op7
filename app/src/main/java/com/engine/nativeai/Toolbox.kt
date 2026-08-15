@@ -1,6 +1,7 @@
 package com.engine.nativeai
 
 import android.content.Context
+import java.io.File
 
 /**
  * Standard tool set for the agent + settings inventory (core-hardening C1).
@@ -17,7 +18,14 @@ class Toolbox(
     val sources: SourceRegistry = SourceRegistry(memory).apply {
         seed(SourceSeedLoader(context).load()) // uBO-style default catalog, first-run only
     }
-    val sourceUpdater: SourceUpdater = SourceUpdater(sources, memory)
+    val sourceUpdater: SourceUpdater = SourceUpdater(
+        sources,
+        memory,
+        textExtractor = TermuxDocumentTextExtractor(
+            backend = executionManager.backend(),
+            scratchDir = File(context.getExternalFilesDir(null), "pdf"),
+        ),
+    )
     val tools: ToolRegistry = ToolRegistry().apply {
         register(MemorySearchTool(memory))
         register(CalculatorTool())
