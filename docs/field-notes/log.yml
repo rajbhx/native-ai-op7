@@ -219,3 +219,13 @@ sections:
         cause: "status was initialized once with a fixed string, never reflecting the actual library scan"
         solution: "initialize from LocalModelLibrary.scan(): empty -> guidance to Download/import; non-empty -> 'Local library ready: <files>'"
         tags: [ux, status, local-library, contradiction]
+      - id: A44
+        problem: "pm install -r of the CI build failed INSTALL_FAILED_UPDATE_INCOMPATIBLE (signatures do not match) even though the workflow restores DEBUG_KEYSTORE_BASE64"
+        cause: "the installed app predates the current persistent keystore value; the secret was rotated/replaced at some point, so the old and new debug keys differ"
+        solution: "one-time pm uninstall + reinstall (app data loss), re-stage the GGUF via run-as; future builds signed with the same secret update in place — verify with the next install before trusting 'persistent'"
+        tags: [ci, keystore, install, signature, update-incompatible]
+      - id: A45
+        problem: "pushing code fix + docs back-to-back cancelled the code CI build"
+        cause: "build.yml concurrency group build-<ref> with cancel-in-progress: true cancels the previous run on every push"
+        solution: "push code first, wait for its run to finish (or at least pass the build job) before pushing docs; only the latest HEAD build matters"
+        tags: [ci, github-actions, concurrency, cancel]
