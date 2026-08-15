@@ -169,3 +169,28 @@ sections:
         cause: "no derived status, no auto health refresh, hardcoded system prompt, affinity pin result only logged"
         solution: "ModelStatus.line() (READY/AVAILABLE/NO MODEL FILE/ONLINE/OFFLINE) + auto health 60s cache + persisted systemPromptOverride (ThinkingAgent + quick-send) + affinity_applied in native stats JSON + Stats budget/max-ctx lines"
         tags: [model, state, health, system-prompt, affinity, stats]
+      - id: A34
+        problem: "schema v3 onUpgrade was a dev reset - every update dropped the whole memory DB (experiences/facts/messages)"
+        cause: "onUpgrade called DROP TABLE + onCreate as a dev shortcut"
+        solution: "SCHEMA_VERSION 4 + real migration: v3->v4 keeps all existing tables and only adds source KB tables (source_collections, sources, source_files, source_chunks + external FTS5 source_chunks_fts with triggers); SourceSchema holds pure DDL strings shared with the JVM sqlite-jdbc twin; migration-retention test proves old rows survive"
+        tags: [sqlite, migration, schema, sources]
+      - id: A35
+        problem: "source registry/updater logic untestable on JVM because MemoryDatabase extends Android SQLiteOpenHelper"
+        cause: "no storage contract; only the Android implementation existed"
+        solution: "SourceStore interface implemented by MemoryDatabase (device) and JdbcSourceStore (test-only org.xerial:sqlite-jdbc, bundles FTS5) running the exact SourceSchema DDL; FakeSourceStore for unit tests; tests for migration retention, chunker bounds, candidate staleness order, 304 conditional fetch, changed-blob-only, read-time eviction, BM25 + LIKE search"
+        tags: [testing, sqlite-jdbc, jvm, sources]
+      - id: A36
+        problem: "RAW_TEXT sources errored on the periodic refresh (marked ERROR)"
+        cause: "updateSourceInternal dispatched RAW_TEXT to the HTTP path, which requires a contentUrl"
+        solution: "RAW_TEXT skipped in the updater - it is indexed once on add via db.replaceSourceChunks"
+        tags: [sources, updater, bug]
+      - id: A37
+        problem: "chunk overlap disappeared after the word-boundary refactor"
+        cause: "loop advanced start = end (no overlap), losing boundary context between chunks"
+        solution: "advance start = end - overlapChars with a progress guard; SourceChunkerTest asserts consecutive chunks share words"
+        tags: [chunker, retrieval]
+      - id: A38
+        problem: "future memory/Source-KB phases lacked a reference for scoped verbatim memory + pluggable retrieval"
+        cause: "user pointed at MemPalace/mempalace (MIT) as a source of ideas for later phases"
+        solution: "recorded docs/source-research/mempalace-reference.md: scoped hierarchy (wings/rooms/drawers) maps to collections/sources/files-chunks; pluggable backend seam matches SourceStore/MemoryProvider; hybrid keyword fallback validates FTS5+LIKE; embedder sizes (~80 MB minilm) give ADR-007 a real budget figure; LongMemEval R@5 as a future benchmark; keep read_time eviction for verbatim-growth control"
+        tags: [memory, sources, reference, research]
