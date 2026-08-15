@@ -31,7 +31,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -79,6 +82,8 @@ import com.engine.nativeai.AgentEvent
 import com.engine.nativeai.AgentState
 import com.engine.nativeai.AgentTask
 import com.engine.nativeai.CalculatorTool
+import com.engine.nativeai.ChatHistory
+import com.engine.nativeai.ChatSession
 import com.engine.nativeai.EngineForegroundService
 import com.engine.nativeai.EngineConfig
 import com.engine.nativeai.EngineServiceState
@@ -218,6 +223,21 @@ fun EngineScreen(
     // One construction path for tools + sources (core-hardening C1): the
     // sheet inventory, the agent and the startup refresh share this instance.
     val toolbox = remember { Toolbox(context, engine, registry, prefs, executionManager) }
+
+    // Chat history (Phase 3 gap): runs were persisted but never visible.
+    var historyExpanded by remember { mutableStateOf(false) }
+    var historyLoaded by remember { mutableStateOf(false) }
+    var historySessions by remember { mutableStateOf<List<ChatSession>>(emptyList()) }
+    val chatHistory = remember {
+        ChatHistory(toolbox.memory::recentSessions, toolbox.memory::recentMessages)
+    }
+
+    fun loadHistory() {
+        historyLoaded = true
+        scope.launch {
+            historySessions = chatHistory.recent(limit = 8, messagesPerSession = 10)
+        }
+    }
     var termuxStatus by remember { mutableStateOf(executionManager.status()) }
     var termuxReason by remember { mutableStateOf(executionManager.statusReason()) }
     var terminalEnabled by remember { mutableStateOf(prefs.terminalEnabled) }
@@ -708,19 +728,78 @@ fun EngineScreen(
         }
         Spacer(Modifier.height(12.dp))
 
-        // ---------------- LOG ZONE: AGENT TRACE ----------------
+        // ---------------- LOG ZONE: AGENT TRACE / HISTORY ----------------
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { traceExpanded = !traceExpanded },
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("AGENT TRACE", color = OpText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "AGENT TRACE",
+                color = if (!historyExpanded) OpText else OpTextSecondary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clickable { historyExpanded = false }
+                    .padding(end = 12.dp),
+            )
+            Text(
+                if (historyLoaded) "HISTORY \u00b7 ${historySessions.size}" else "HISTORY",
+                color = if (historyExpanded) OpText else OpTextSecondary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clickable {
+                        historyExpanded = true
+                        if (!historyLoaded) loadHistory()
+                    }
+                    .padding(end = 12.dp),
+            )
             Spacer(Modifier.weight(1f))
-            Text(if (traceExpanded) "\u25be" else "\u25b8", color = OpTextSecondary, fontSize = 14.sp)
+            Text(
+                if (!historyExpanded && traceExpanded) "\u25be" else "\u25b8",
+                color = OpTextSecondary,
+                fontSize = 14.sp,
+                modifier = Modifier.clickable {
+                    if (!historyExpanded) traceExpanded = !traceExpanded
+                },
+            )
         }
         Spacer(Modifier.height(8.dp))
-        if (traceExpanded) {
+        if (historyExpanded) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(OpCard, RoundedCornerShape(12.dp)),
+            ) {
+                if (!historyLoaded) {
+                    Text(
+                        "Loading\u2026",
+                        color = OpTextSecondary,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                } else if (historySessions.isEmpty()) {
+                    Text(
+                        "No conversation history yet \u2014 agent runs are saved as you go.",
+                        color = OpTextSecondary,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                } else {
+                    LazyColumn(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items(historySessions) { session ->
+                            HistorySessionCard(session, onReuse = { prompt = it })
+                        }
+                    }
+                }
+            }
+        } else if (traceExpanded) {
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -1587,6 +1666,50 @@ private fun PillButton(
         Text(text)
     }
 }
+
+@Composable
+private fun HistorySessionCard(session: ChatSession, onReuse: (String) -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(OpBg, RoundedCornerShape(10.dp))
+            .border(1.dp, OpBorder, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+    ) {
+        Text(
+            "${formatHistoryTime(session.startedAt)} \u00b7 ${session.meta.ifBlank { "session ${session.id}" }}",
+            color = OpTextSecondary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        session.messages.forEach { msg ->
+            val user = msg.role == "user"
+            Text(
+                "${if (user) "YOU" else "AGENT"}  ${msg.content.take(140)}",
+                color = if (user) OpText else OpTextSecondary,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                modifier = if (user) {
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onReuse(msg.content) }
+                        .padding(top = 6.dp)
+                } else {
+                    Modifier.fillMaxWidth().padding(top = 6.dp)
+                },
+            )
+        }
+        Text(
+            "tap a YOU line to reuse it as your next prompt",
+            color = OpTextSecondary,
+            fontSize = 9.sp,
+        )
+    }
+}
+
+private fun formatHistoryTime(ms: Long): String =
+    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        .format(java.util.Date(ms))
 
 @Composable
 private fun ValuePill(
