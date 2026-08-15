@@ -33,6 +33,11 @@ enum class EngineServiceState {
  * It also runs the RSS watchdog against the 1.5 GB ceiling and periodically
  * checks the verified-experience count against the LoRA eligibility gate —
  * it never trains silently (the dataset is preserved for external training).
+ *
+ * Phase A4: lifecycle state is driven by [EngineServiceStateMachine] — real
+ * transitions only (STARTING -> READY -> BUSY/READY, ERROR on init failure,
+ * STOPPED on destroy). onDestroy also shuts down the shared execution layer
+ * so no managed shell process survives the service.
  */
 class EngineForegroundService : Service() {
 
@@ -46,23 +51,36 @@ class EngineForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        _state.value = EngineServiceState.STARTING
-        startForeground(NOTIFICATION_ID, buildNotification("Engine online"))
+        machine.start()
+        publishState()
+        startForeground(NOTIFICATION_ID, buildNotification("Engine starting"))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (engine == null) {
-            engine = NativeEngine()
-            memory = MemoryDatabase(this)
-            training = SelfLearningPipeline(memory!!, File(filesDir, "training"))
-            watchdog = MemoryWatchdog(engine!!)
-            scope.launch { watchdogLoop() }
+        try {
+            if (engine == null) {
+                engine = NativeEngine()
+                memory = MemoryDatabase(this)
+                training = SelfLearningPipeline(memory!!, File(filesDir, "training"))
+                watchdog = MemoryWatchdog(engine!!)
+                scope.launch { watchdogLoop() }
+            }
+            machine.ready()
+            publishState()
+            notify("Engine online \u00b7 ${machine.state}")
+        } catch (e: Exception) {
+            machine.error()
+            publishState()
+            notify("Engine error \u00b7 ${e.message?.take(60) ?: "init failed"} (retrying)")
         }
-        _state.value = EngineServiceState.READY
         return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun publishState() {
+        _state.value = machine.state
+    }
 
     private suspend fun watchdogLoop() {
         var tick = 0
@@ -76,7 +94,7 @@ class EngineForegroundService : Service() {
                         // to reduce context / abort. Never silently exceed.
                         notify("RSS ${mb}MB over ${snap.ceilingBytes / (1024 * 1024)}MB ceiling")
                     } else if (tick % 6 == 0) {
-                        notify("Engine online · RSS ${mb}MB")
+                        notify("Engine online \u00b7 RSS ${mb}MB")
                     }
                 }
                 // Learning eligibility gate (never auto-trains).
@@ -99,7 +117,7 @@ class EngineForegroundService : Service() {
         val export = training.exportVerifiedTrainingData()
         val eligibility = training.triggerBackgroundFinetune(export)
         if (eligibility.eligible) {
-            notify("Training eligibility met — preserved for external training")
+            notify("Training eligibility met \u2014 preserved for external training")
         }
     }
 
@@ -130,14 +148,21 @@ class EngineForegroundService : Service() {
     }
 
     private fun notify(text: String) {
-        getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, buildNotification(text))
+        runCatching {
+            getSystemService(NotificationManager::class.java)
+                .notify(NOTIFICATION_ID, buildNotification(text))
+        }
     }
 
     override fun onDestroy() {
-        _state.value = EngineServiceState.STOPPED
+        machine.stop()
+        publishState()
         scope.cancel()
+        // Graceful shutdown (Phase A4): terminate managed exec processes
+        // before releasing the engine; never leave orphaned shells.
+        runCatching { ExecutionManager.shared(this).shutdown() }
         engine?.close()
+        notify("Engine stopped")
         super.onDestroy()
     }
 
@@ -145,8 +170,15 @@ class EngineForegroundService : Service() {
         private const val CHANNEL_ID = "native_ai_engine"
         private const val NOTIFICATION_ID = 1001
 
+        private val machine = EngineServiceStateMachine()
         private val _state = MutableStateFlow(EngineServiceState.STOPPED)
         val state: StateFlow<EngineServiceState> = _state.asStateFlow()
+
+        /** Agent/generation activity mirrors into BUSY/READY (Phase A4). */
+        fun reportBusy(busy: Boolean) {
+            machine.busy(busy)
+            _state.value = machine.state
+        }
 
         fun start(context: Context) {
             val intent = Intent(context, EngineForegroundService::class.java)
