@@ -125,3 +125,18 @@
   WebResearchEngine (M3), ResearchAgent (M4), training schema v2 (M5).
   section: A
   tags: [vision, roadmap, memory-first, plan]
+
+## Revision f5fafd1 — M1a conversation store (CI green)
+- **P no conversation history was persisted; the app reset every run.**
+  cause: sessions existed but no messages table; user prompts and answers
+  lived only in UI state (matches earlier UX finding "no chat history").
+  solution: schema v3 adds `messages` (session_id/role/content/created);
+  `recordMessage`/`recentMessages`/`searchMessages` (LIKE fallback, matching
+  the FTS5-less OP7 SQLite path); EngineScreen persists user prompt at
+  session start and the final answer on AgentEvent.Final (best-effort,
+  wrapped so memory failure never crashes the agent). SQL validated locally
+  against a schema replica (ordering + LIKE hits). CI run 31865939332 GREEN.
+  On-device restart-persistence proof PENDING (device in use): run a prompt,
+  force-stop, reopen -> messages rows must survive in `databases/memory.db`.
+  section: A
+  tags: [memory, conversations, schema, persistence, m1]
