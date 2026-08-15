@@ -111,7 +111,9 @@ import com.engine.nativeai.ModelRegistry
 import com.engine.nativeai.ModelPreferencesStore
 import com.engine.nativeai.ModelRouter
 import com.engine.nativeai.ModelStreamEvent
+import com.engine.nativeai.MnnBackend
 import com.engine.nativeai.RuntimeKind
+import com.engine.nativeai.USearchVectorIndex
 import com.engine.nativeai.OpenAICompatibleProvider
 import com.engine.nativeai.PrivacyMode
 import com.engine.nativeai.ProviderRegistry
@@ -1237,6 +1239,10 @@ fun EngineScreen(
         DiagnosticsDialog(
             snapshot = diagnosticsSnapshot,
             serviceState = serviceState.name,
+            runtimeLines = listOf(
+                "MNN    ${MnnBackend().status()}",
+                "VECT   ${if (USearchVectorIndex.selfTest()) "USearch ready (self-test ok)" else "USearch unavailable (self-test failed)"}",
+            ),
             onClear = {
                 runtimeMetrics.reset()
                 diagnosticsSnapshot = null
@@ -1252,10 +1258,11 @@ fun EngineScreen(
 private fun DiagnosticsDialog(
     snapshot: DiagnosticsSnapshot?,
     serviceState: String,
+    runtimeLines: List<String> = emptyList(),
     onClear: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val lines = snapshot?.let { snap ->
+    val lines = (snapshot?.let { snap ->
         val m = snap.metrics
         val toolsLine = if (m.tools.isEmpty()) {
             "none"
@@ -1282,8 +1289,8 @@ private fun DiagnosticsDialog(
             rssLine,
             engineLine,
             "SERVICE      $serviceState",
-        )
-    } ?: listOf("collecting\u2026")
+        ) + runtimeLines
+    } ?: listOf("collecting\u2026") + runtimeLines
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = OpBg,
