@@ -2,8 +2,14 @@ package com.engine.nativeai
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import com.engine.nativeai.ui.EngineScreen
+import com.engine.nativeai.ui.MemoryScreen
 import com.engine.nativeai.ui.OxygenOSTheme
 import java.io.File
 
@@ -44,14 +50,21 @@ class MainActivity : ComponentActivity() {
         val discovery = ModelDiscoveryService(registry, providerRegistry)
         setContent {
             OxygenOSTheme {
-                EngineScreen(
-                    engine = engine,
-                    registry = registry,
-                    providerRegistry = providerRegistry,
-                    prefs = prefs,
-                    discovery = discovery,
-                    initialPrompt = initialPrompt,
-                )
+                var showMemory by rememberSaveable { mutableStateOf(false) }
+                BackHandler(enabled = showMemory) { showMemory = false }
+                if (showMemory) {
+                    MemoryScreen(onBack = { showMemory = false })
+                } else {
+                    EngineScreen(
+                        engine = engine,
+                        registry = registry,
+                        providerRegistry = providerRegistry,
+                        prefs = prefs,
+                        discovery = discovery,
+                        initialPrompt = initialPrompt,
+                        onOpenMemory = { showMemory = true },
+                    )
+                }
             }
         }
     }

@@ -123,6 +123,7 @@ fun EngineScreen(
     prefs: ModelPreferencesStore,
     discovery: ModelDiscoveryService,
     initialPrompt: String?,
+    onOpenMemory: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -271,6 +272,21 @@ fun EngineScreen(
                 }
                 Text("OP7", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Text("SD855 \u00b7 8 GB", color = OpTextSecondary, fontSize = 9.sp)
+            }
+            Spacer(Modifier.width(8.dp))
+            Surface(
+                onClick = onOpenMemory,
+                shape = RoundedCornerShape(8.dp),
+                color = OpCard,
+                border = BorderStroke(1.dp, OpBorder),
+            ) {
+                Text(
+                    "MEMORY",
+                    color = OpTextSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                )
             }
         }
         Spacer(Modifier.height(10.dp))
