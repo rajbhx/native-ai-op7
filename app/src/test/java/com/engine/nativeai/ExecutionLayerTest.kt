@@ -77,7 +77,6 @@ class ExecutionLayerTest {
         assertTrue("expected ok, got: ${ok.error} ${ok.output}", ok.ok)
         assertTrue(ok.output.contains("terminal-ok"))
     }
-}
 
     @Test
     fun localBackendShutdownDestroysLiveProcesses() = runBlocking {
@@ -92,3 +91,4 @@ class ExecutionLayerTest {
         // The execute call must return (killed), not hang forever.
         assertTrue(r != null)
     }
+}

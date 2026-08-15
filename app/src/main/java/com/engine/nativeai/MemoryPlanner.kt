@@ -1,11 +1,12 @@
 package com.engine.nativeai
 
 /**
- * Dynamic 1.5 GB memory planner (user clarification: "1.5 GB means 1.5 GB
- * RAM usage but it's dynamic"). The 1536 MB ceiling stays the hard cap; the
- * planner sizes the KV cache (context) against live available RAM with a
- * safety margin instead of a static carve-out. All values are labeled
- * estimates — nothing is fabricated.
+ * Dynamic 1.5 GB memory planner (user clarification: "1.5 GB is the maximum
+ * dynamic RAM usage — never exceeded, but always sized dynamically"). The
+ * 1536 MB ceiling is a HARD MAXIMUM: the planner never plans above it, and
+ * it sizes the KV cache (context) against live available RAM with a safety
+ * margin instead of a static carve-out. All values are labeled estimates —
+ * nothing is fabricated.
  */
 object MemoryPlanner {
 
