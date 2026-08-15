@@ -1,0 +1,6 @@
+{"kind":"meta","run_id":"fixture-candidate-regress","label":"idle","device":"OnePlus 7"}
+{"kind":"bench","run_id":"fr-1","provider_id":"local-llama","category":"reasoning","threads":2,"n_ctx":1024,"gpu_layers":0,"tokens":128,"duration_ms":80000,"tokens_per_sec":1.6,"first_token_ms":1950,"rss_bytes":1650000000,"kv_type_k":"q8_0","kv_type_v":"q8_0","ok":true}
+{"kind":"bench","run_id":"fr-2","provider_id":"local-llama","category":"reasoning","threads":2,"n_ctx":1024,"gpu_layers":0,"tokens":128,"duration_ms":77500,"tokens_per_sec":1.65,"first_token_ms":1885,"rss_bytes":770000000,"kv_type_k":"q8_0","kv_type_v":"q8_0","ok":true}
+{"kind":"bench","run_id":"fr-3","provider_id":"local-llama","category":"context","threads":4,"n_ctx":2048,"gpu_layers":0,"tokens":128,"duration_ms":65000,"tokens_per_sec":1.97,"first_token_ms":2340,"rss_bytes":800000000,"kv_type_k":"q8_0","kv_type_v":"q8_0","ok":true}
+{"kind":"bench","run_id":"fr-4","provider_id":"local-llama","category":"context","threads":4,"n_ctx":2048,"gpu_layers":0,"tokens":128,"duration_ms":66700,"tokens_per_sec":1.92,"first_token_ms":2400,"rss_bytes":795000000,"kv_type_k":"q8_0","kv_type_v":"q8_0","ok":true}
+{"kind":"cell","run_id":"fr-1","status":"done","launch_state":"COLD","cold_start_ms":480}
