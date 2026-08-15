@@ -17,6 +17,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Automation/test hook: seed the prompt field via
+        // am start ... --es prompt "text" (avoids flaky IME injection).
+        val initialPrompt = intent?.getStringExtra("prompt")
         val modelFile = File(filesDir, "models/model.gguf")
         val providerRegistry = ProviderRegistry()
         val prefs = ModelPreferences(this)
@@ -47,6 +50,7 @@ class MainActivity : ComponentActivity() {
                     providerRegistry = providerRegistry,
                     prefs = prefs,
                     discovery = discovery,
+                    initialPrompt = initialPrompt,
                 )
             }
         }

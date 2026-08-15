@@ -122,6 +122,7 @@ fun EngineScreen(
     providerRegistry: ProviderRegistry,
     prefs: ModelPreferencesStore,
     discovery: ModelDiscoveryService,
+    initialPrompt: String?,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -131,12 +132,7 @@ fun EngineScreen(
     var status by remember {
         mutableStateOf("Engine library loaded. Put a GGUF at:\n${modelFile.absolutePath}")
     }
-    // Test/automation hook: launch with --es prompt "..." to seed the field
-    // without the IME (adb am start ... --es prompt "text").
-    val intentPrompt = remember {
-        (context as? android.app.Activity)?.intent?.getStringExtra("prompt")
-    }
-    var prompt by remember { mutableStateOf(intentPrompt ?: "") }
+    var prompt by remember { mutableStateOf(initialPrompt ?: "") }
     var output by remember { mutableStateOf("") }
     var answer by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
