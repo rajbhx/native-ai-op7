@@ -32,6 +32,22 @@
       "owner": "rajbhx",
       "repo": "op7-special-build-playbook",
       "updateAfterHours": 12
+    },
+    {
+      "collection": "Knowledge",
+      "title": "uBlock Origin",
+      "type": "GITHUB_REPO",
+      "owner": "gorhill",
+      "repo": "uBlock",
+      "updateAfterHours": 48
+    },
+    {
+      "collection": "Knowledge",
+      "title": "MemPalace",
+      "type": "GITHUB_REPO",
+      "owner": "MemPalace",
+      "repo": "mempalace",
+      "updateAfterHours": 48
     }
   ]
 }
