@@ -62,8 +62,10 @@ class ThinkingAgent(
             }
             emit(AgentEvent.Routed(descriptor.id, descriptor.provider, descriptor.costTier, taskType))
 
-            val memoryCtx = withContext(Dispatchers.IO) {
-                memory.searchContext(userPrompt, topK = 3)
+            val memoryCtx = try {
+                withContext(Dispatchers.IO) { memory.searchContext(userPrompt, topK = 3) }
+            } catch (e: Exception) {
+                "" // memory failure must never kill the agent loop (A20/A27)
             }.let {
                 if (descriptor.kind == ModelKind.REMOTE) MemoryPrivacyFilter.forRemote(it) else it
             }

@@ -23,6 +23,23 @@ class MemoryDatabase(context: Context) :
      *  Android 10: "no such module: fts5"); retrieval falls back to LIKE matching. */
     private var ftsAvailable = true
 
+    /** Re-verify FTS5 on EVERY open, not just schema creation. ftsAvailable must
+     *  not survive process restarts as true on OEM SQLite without fts5 — onCreate
+     *  only runs when the DB file is first created (A20 regression: A27). */
+    override fun onConfigure(db: SQLiteDatabase) {
+        super.onConfigure(db)
+        ftsAvailable = probeFts5(db)
+    }
+
+    private fun probeFts5(db: SQLiteDatabase): Boolean = try {
+        // Cheap probe; only meaningful once experiences_fts exists (onConfigure
+        // runs before onCreate on first open, where onCreate still sets the flag).
+        db.rawQuery("SELECT rowid FROM experiences_fts LIMIT 0", null).use { }
+        true
+    } catch (e: SQLiteException) {
+        false
+    }
+
     companion object {
         private const val SCHEMA_VERSION = 1
         private const val DEFAULT_TOP_K = 3  // spec: Top K = 3 default
