@@ -82,6 +82,20 @@ class RemoteProviderBootstrapTest {
     }
 
     @Test
+    fun ensurePersistedSelectionIgnoresLibraryLocalIds() {
+        val registry = ModelRegistry()
+
+        RemoteProviderBootstrap.ensurePersistedSelection(
+            registry,
+            ProviderRegistry(),
+            "local-qwen2-0.5b",
+        )
+
+        assertNull(registry.get("local-qwen2-0.5b"))
+        assertEquals(0, registry.list().size)
+    }
+
+    @Test
     fun ensurePersistedSelectionIgnoresLocalModel() {
         val registry = ModelRegistry()
 

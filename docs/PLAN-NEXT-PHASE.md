@@ -80,3 +80,34 @@ learning dataset pipeline (Phase C below), embedding/RAG vector memory.
 - Service: start/stop/restart, no orphan processes after shutdown.
 - Stop/abort: local + remote generation interrupted, state returns READY.
 - Regression: remote error path emits Error (flow transparency), tests 1-3.
+
+## Phase D — Local model library + observability (combined increment, in progress)
+
+Status: implemented → CI green → on-device verified → field note (A40/A41).
+
+### D1. Local model library (multi-model, select-then-Load)
+- `LocalModelLibrary` scans `filesDir/models` (`*.gguf`, ignores `.tmp`),
+  stable ids (`model.gguf` → `local-llama`, others → `local-<stem>`).
+- `LocalModelImporter`: SAF copy with progress, StatFs +64 MB margin, GGUF
+  magic guard, temp rename. Import → rescan → auto-select → "tap Load Model".
+- One `LocalModelProvider` per entry sharing the single `NativeEngine`
+  (`LocalModelProvider` accepts a descriptor override); deleted files drop
+  their provider; empty library keeps the `local-llama` placeholder.
+- `RemoteProviderBootstrap.ensurePersistedSelection` skips all `local-*` ids.
+- Model picker: "＋ Pick GGUF from storage…" row in LOCAL + size/quant subtitle.
+
+### D2. Observability (metrics + diagnostics + jank + CI/dev gates)
+- `AgentEvent` gains `atMs`/`durationMs`; trace lines render `HH:mm:ss`.
+- `RuntimeMetrics` (load, first-token, tok/s, tools, errors/retries,
+  restarts, jank) + `DiagnosticsProvider`/`RuntimeDiagnostics` +
+  `DiagnosticsDialog` (Stats button).
+- `FrameJankMonitor`: Choreographer dropped-frame counter, no dependency.
+- LeakCanary `debugImplementation` only; `.maestro/acceptance/` flows run on
+  the physical device (arm64-only APK can't run on x86_64 CI emulators).
+
+### D3. Acceptance (on-device)
+- LOCAL rows list every GGUF; SAF import adds without deleting others;
+  selection persists across force-stop; Load required before Agent; model
+  card shows size/quant; delete works; empty library doesn't crash.
+- Stats shows measured values after a local run; trace timestamps; jank
+  counter increments; restart counter after force-stop; Maestro flows pass.

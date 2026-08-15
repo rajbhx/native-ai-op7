@@ -67,6 +67,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.9.0")
 
+    // Dev-time leak detection only: never shipped in release (observability ref).
+    debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
+
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     // JVM twin of the Android SQLite store for source KB tests (test-only;

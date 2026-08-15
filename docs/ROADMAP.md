@@ -65,10 +65,15 @@ One measured optimization per revision; never fabricate capabilities.
   present on device, default off (no fake acceleration).
 - Memory monitor vs measured 1B envelope (KV 12.75 MiB, compute 302 MiB,
   RSS ~729 MB — docs/source-research/op7-memory-audit.md).
+- Observability increment ✅: RuntimeMetrics (load/first-token/tok-s/tools/
+  errors/jank), DiagnosticsProvider + DiagnosticsDialog, FrameJankMonitor,
+  structured trace timestamps, LeakCanary (debug-only), Maestro flows —
+  reference: docs/source-research/perf-observability-reference.md.
 
-## Phase 8 — Production hardening ⬜
+## Phase 8 — Production hardening 🟡
 - ⬜ Release signing + R8, crash/ANR surfacing.
-- ⬜ Structured diagnostics/export (trace events with timestamp/run ID).
+- ✅ Structured diagnostics/export (trace events with timestamp/run ID) —
+  trace line timestamps + DiagnosticsDialog shipped; export/roll-up later.
 - ⬜ Regression suite + field-note loop (every problem → docs/field-notes,
   log.yml, playbook sync).
 
@@ -81,9 +86,11 @@ One measured optimization per revision; never fabricate capabilities.
   without justification.
 
 ## Immediate next (ordered)
-1. CI green for current UX/exec-layer work; install in place (keystore).
-2. On-device: verify "not selected" fix, remote persistence across restart,
-   intent `--es prompt` hook, remote Send routing.
+1. Local model library (multi-GGUF, SAF import, select-then-Load) + install
+   in place; on-device acceptance incl. Maestro flows.
+2. On-device: verify remote persistence across restart, intent `--es prompt`
+   hook, remote Send routing; observe DiagnosticsDialog values (real
+   measurements only).
 3. Run user tests 1–3 (math routing, ReAct memory loop, 2048-ctx sustained
    generation) and record results + field note A24+.
 4. Phase 7 sweep (threads/GPU layers) → Vulkan/NNAPI decision.

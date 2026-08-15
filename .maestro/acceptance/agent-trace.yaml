@@ -1,0 +1,12 @@
+# Agent send + structured trace visibility (spec: trace MODEL/PROVIDER lines).
+# Requires any routable model; works with local or remote fallback.
+appId: com.engine.nativeai
+---
+- launchApp
+- tapOn: "What do you want me to do?"
+- inputText: "Reply with exactly: ok"
+- tapOn: "Send"
+- extendedWaitUntil:
+    visible: ".*MODEL.*"
+    timeout: 60000
+- assertVisible: ".*PROVIDER.*"

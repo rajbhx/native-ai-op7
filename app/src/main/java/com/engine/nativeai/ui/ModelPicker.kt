@@ -38,7 +38,9 @@ import androidx.compose.ui.unit.sp
 import com.engine.nativeai.ModelAvailability
 import com.engine.nativeai.ModelCostTier
 import com.engine.nativeai.ModelDescriptor
+import com.engine.nativeai.LocalModelEntry
 import com.engine.nativeai.ModelKind
+import com.engine.nativeai.ModelStatus
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -59,6 +61,8 @@ fun ModelPickerDialog(
     onToggleFavorite: (String) -> Unit,
     onRefresh: () -> Unit,
     onConfigure: ((ModelDescriptor) -> Unit)? = null,
+    localEntries: List<LocalModelEntry> = emptyList(),
+    onPickLocal: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -134,10 +138,19 @@ fun ModelPickerDialog(
                             ModelRow(it, selectedId, favorites, onSelect, onToggleFavorite, onConfigure)
                         }
                     }
-                    if (local.isNotEmpty()) {
+                    if (local.isNotEmpty() || onPickLocal != null) {
                         item { SectionHeader("LOCAL") }
+                        if (onPickLocal != null &&
+                            (filter == PickerFilter.ALL || filter == PickerFilter.LOCAL) &&
+                            pickRowVisible(q)
+                        ) {
+                            item { PickLocalRow(onPickLocal) }
+                        }
                         items(local) {
-                            ModelRow(it, selectedId, favorites, onSelect, onToggleFavorite, onConfigure)
+                            ModelRow(
+                                it, selectedId, favorites, onSelect, onToggleFavorite, onConfigure,
+                                subtitle = localSubtitle(it, localEntries),
+                            )
                         }
                     }
                     if (other.isNotEmpty()) {
@@ -211,6 +224,7 @@ private fun ModelRow(
     onSelect: (ModelDescriptor) -> Unit,
     onToggleFavorite: (String) -> Unit,
     onConfigure: ((ModelDescriptor) -> Unit)?,
+    subtitle: String? = null,
 ) {
     val selected = d.id == selectedId
     Row(
@@ -240,6 +254,14 @@ private fun ModelRow(
                 AvailabilityDot(d.availability)
                 CapabilityChips(d)
             }
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    color = OpTextSecondary,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
         if (d.kind == ModelKind.REMOTE && onConfigure != null) {
             Text(
@@ -260,6 +282,37 @@ private fun ModelRow(
                 .padding(6.dp),
         )
     }
+}
+
+@Composable
+private fun PickLocalRow(onPickLocal: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .background(OpCard, RoundedCornerShape(10.dp))
+            .clickable(onClick = onPickLocal)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "\uff0b Pick GGUF from storage\u2026",
+            color = OpRed,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+private fun pickRowVisible(q: String): Boolean =
+    q.isEmpty() || listOf("pick", "gguf", "import", "storage", "local", "add").any { it in q }
+
+private fun localSubtitle(d: ModelDescriptor, entries: List<LocalModelEntry>): String? {
+    if (d.kind != ModelKind.LOCAL) return null
+    val entry = entries.firstOrNull { it.id == d.id } ?: return null
+    val mb = entry.sizeBytes / (1024L * 1024L)
+    val quant = ModelStatus.quantTag(entry.file.name)
+    return "GGUF \u00b7 ${mb} MB" + (quant?.let { " \u00b7 $it" } ?: "")
 }
 
 @Composable

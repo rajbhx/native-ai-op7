@@ -10,13 +10,14 @@ import kotlinx.coroutines.flow.map
 class LocalModelProvider(
     private val engine: NativeEngine,
     private val config: EngineConfig,
+    descriptor: ModelDescriptor? = null,
 ) : ModelProvider {
 
     companion object {
         const val LOCAL_MODEL_ID = "local-llama"
     }
 
-    override val descriptor = ModelDescriptor(
+    override val descriptor: ModelDescriptor = descriptor ?: ModelDescriptor(
         id = LOCAL_MODEL_ID,
         displayName = "Local llama.cpp (OP7)",
         provider = "local",

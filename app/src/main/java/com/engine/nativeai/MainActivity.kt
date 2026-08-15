@@ -27,16 +27,15 @@ class MainActivity : ComponentActivity() {
         // Automation/test hook: seed the prompt field via
         // am start ... --es prompt "text" (avoids flaky IME injection).
         val initialPrompt = intent?.getStringExtra("prompt")
-        val modelFile = File(filesDir, "models/model.gguf")
+        val localLibrary = LocalModelLibrary(File(filesDir, "models"))
         val providerRegistry = ProviderRegistry()
         val prefs = ModelPreferences(this)
         providerRegistry.setBaseUrl(ModelCatalog.ZEN_PROVIDER, prefs.zenBaseUrl)
         val registry = ModelRegistry(File(filesDir, "models/catalog.json")).apply {
-            register(
-                LocalModelProvider(
-                    engine,
-                    EngineConfig(modelFile.absolutePath, nativeLibDir = applicationInfo.nativeLibraryDir),
-                ),
+            localLibrary.syncInto(
+                this,
+                engine,
+                applicationInfo.nativeLibraryDir,
             )
             ModelCatalog.freeRemoteSeeds().forEach { addDescriptor(it) }
             loadCatalog()
@@ -66,6 +65,7 @@ class MainActivity : ComponentActivity() {
                         providerRegistry = providerRegistry,
                         prefs = prefs,
                         discovery = discovery,
+                        localLibrary = localLibrary,
                         initialPrompt = initialPrompt,
                         onOpenMemory = { showMemory = true },
                         onOpenSources = { showSources = true },

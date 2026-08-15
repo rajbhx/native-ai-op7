@@ -8,6 +8,8 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -46,6 +48,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -84,7 +87,11 @@ import com.engine.nativeai.FinalAnswerTool
 import com.engine.nativeai.GenerationConfig
 import com.engine.nativeai.ExecutionManager
 import com.engine.nativeai.ExecutionPolicy
+import com.engine.nativeai.FrameJankMonitor
+import com.engine.nativeai.ImportResult
 import com.engine.nativeai.LocalFallbackProvider
+import com.engine.nativeai.LocalModelImporter
+import com.engine.nativeai.LocalModelLibrary
 import com.engine.nativeai.LocalModelProvider
 import com.engine.nativeai.MemoryDatabase
 import com.engine.nativeai.MemoryPlanner
@@ -110,6 +117,9 @@ import com.engine.nativeai.ProviderRegistry
 import com.engine.nativeai.RemoteProviderBootstrap
 import com.engine.nativeai.NativeEngine
 import com.engine.nativeai.RoutingMode
+import com.engine.nativeai.RuntimeDiagnostics
+import com.engine.nativeai.RuntimeMetrics
+import com.engine.nativeai.DiagnosticsSnapshot
 import com.engine.nativeai.SystemInfoTool
 import com.engine.nativeai.TaskType
 import com.engine.nativeai.TerminalTool
@@ -135,17 +145,24 @@ fun EngineScreen(
     providerRegistry: ProviderRegistry,
     prefs: ModelPreferencesStore,
     discovery: ModelDiscoveryService,
+    localLibrary: LocalModelLibrary,
     initialPrompt: String?,
     onOpenMemory: () -> Unit = {},
     onOpenSources: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val modelFile = remember { File(context.filesDir, "models/model.gguf") }
+    val downloadTarget = remember { File(context.filesDir, "models/model.gguf") }
+    val modelsDir = remember { File(context.filesDir, "models") }
+    var localModels by remember { mutableStateOf(localLibrary.scan()) }
+    val runtimeMetrics = remember { RuntimeMetrics() }
+    val diagnostics = remember { RuntimeDiagnostics(runtimeMetrics, engine) }
+    val jankMonitor = remember { FrameJankMonitor(runtimeMetrics) }
 
     var loaded by remember { mutableStateOf(false) }
+    var loadedPath by remember { mutableStateOf<String?>(null) }
     var status by remember {
-        mutableStateOf("Engine library loaded. Put a GGUF at:\n${modelFile.absolutePath}")
+        mutableStateOf("Engine library loaded. Put a GGUF in:\n${modelsDir.absolutePath}")
     }
     var prompt by remember { mutableStateOf(initialPrompt ?: "") }
     var output by remember { mutableStateOf("") }
@@ -158,9 +175,10 @@ fun EngineScreen(
     var selectedMode by remember { mutableStateOf(modeIndexFor(prefs.routingMode)) }
     var selectedModelId by remember {
         val persisted = prefs.lastSelectedModelId
+        val defaultLocal = localModels.firstOrNull()?.id ?: LocalModelProvider.LOCAL_MODEL_ID
         mutableStateOf(
             if (persisted != null && registry.list().any { it.id == persisted }) persisted
-            else LocalModelProvider.LOCAL_MODEL_ID,
+            else defaultLocal,
         )
     }
     var favorites by remember { mutableStateOf(prefs.favorites()) }
@@ -189,6 +207,57 @@ fun EngineScreen(
     var probingTermux by remember { mutableStateOf(false) }
     var systemPromptText by remember { mutableStateOf(prefs.systemPromptOverride ?: "") }
     val downloadCancel = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    var importing by remember { mutableStateOf(false) }
+    var importStatus by remember { mutableStateOf("") }
+    var showDiagnostics by remember { mutableStateOf(false) }
+    var diagnosticsSnapshot by remember { mutableStateOf<DiagnosticsSnapshot?>(null) }
+    val importer = remember { LocalModelImporter(modelsDir) }
+    val pickLocalLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                importing = true
+                importStatus = "copying\u2026"
+                val result = importer.import(
+                    resolver = context.contentResolver,
+                    uri = uri,
+                    onProgress = { done, total ->
+                        importStatus = "copying ${done / (1024 * 1024)} MB" +
+                            (total?.let { " / ${it / (1024 * 1024)} MB" } ?: "")
+                    },
+                )
+                importing = false
+                when (result) {
+                    is ImportResult.Success -> {
+                        localModels = localLibrary.scan()
+                        localLibrary.syncInto(
+                            registry,
+                            engine,
+                            context.applicationInfo.nativeLibraryDir,
+                            contextSize,
+                        )
+                        val entry = localModels.firstOrNull { it.file == result.file }
+                        selectedModelId = entry?.id ?: LocalModelProvider.LOCAL_MODEL_ID
+                        prefs.lastSelectedModelId = selectedModelId
+                        status = "Imported ${result.file.name} \u2014 tap Load Model"
+                    }
+                    is ImportResult.Error -> {
+                        importStatus = "failed: ${result.message}"
+                        status = "import failed: ${result.message}"
+                    }
+                }
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        jankMonitor.start()
+        onDispose {
+            jankMonitor.stop()
+            jankMonitor.flush()
+        }
+    }
 
     LaunchedEffect(Unit) {
         // Refresh the catalog once on first launch (cached metadata is used
@@ -244,10 +313,12 @@ fun EngineScreen(
     )
     val models = registry.list()
     val selected = models.firstOrNull { it.id == selectedModelId }
+    val selectedLocalFile: File? = selected?.takeIf { it.kind == ModelKind.LOCAL }
+        ?.let { localLibrary.resolve(it.id) }
     val (connText, connColor) = when {
         selected == null -> "select a model" to OpAmber
         selected.kind == ModelKind.LOCAL ->
-            if (modelFile.exists()) "Available" to Color(0xFF2ECC71)
+            if (selectedLocalFile != null) "Available" to Color(0xFF2ECC71)
             else "No model file" to OpRed
         else ->
             if (providerRegistry.apiKey(selected.provider).isNotBlank()) "Connected" to Color(0xFF2ECC71)
@@ -259,15 +330,16 @@ fun EngineScreen(
     ) EngineUiState.OFFLINE else engineState
 
     // Loads the local GGUF on demand so Agent/Generate work with one tap.
-    suspend fun ensureLocalLoaded(): Boolean {
-        if (loaded) return true
-        if (!modelFile.exists()) {
+    suspend fun ensureLocalLoaded(file: File? = selectedLocalFile): Boolean {
+        val target = file
+        if (target == null) {
             engineState = EngineUiState.ERROR
-            status = "Model not found:\n${modelFile.absolutePath}\nCopy a GGUF there, then retry."
+            status = "Model not found:\n${modelsDir.absolutePath}\nPick or download a GGUF, then retry."
             return false
         }
+        if (loaded && loadedPath == target.absolutePath) return true
         // Dynamic 1.5 GB budget: pre-flight before loading (never crash).
-        val plan = MemoryPlanner.plan(modelFile.length(), contextSize, availableRamBytes(context))
+        val plan = MemoryPlanner.plan(target.length(), contextSize, availableRamBytes(context))
         if (!plan.withinBudget) {
             engineState = EngineUiState.ERROR
             status = "MODEL MAY EXCEED AVAILABLE MEMORY \u2014 estimated " +
@@ -279,19 +351,23 @@ fun EngineScreen(
         status = "loading model (threads=$threads)\u2026"
         return try {
             if (loaded) engine.close()
+            val t0 = System.currentTimeMillis()
             engine.init(
                 EngineConfig(
-                    modelFile.absolutePath,
+                    target.absolutePath,
                     threads = threads,
                     contextSize = contextSize,
                     nativeLibDir = context.applicationInfo.nativeLibraryDir,
                 ),
             )
+            runtimeMetrics.recordModelLoad(System.currentTimeMillis() - t0)
             loaded = true
+            loadedPath = target.absolutePath
             engineState = EngineUiState.COMPLETED
-            status = "Model loaded: ${modelFile.name} (threads=$threads)"
+            status = "Model loaded: ${target.name} (threads=$threads)"
             true
         } catch (e: Exception) {
+            loadedPath = null
             engineState = EngineUiState.ERROR
             status = "init failed: ${e.message}"
             false
@@ -323,7 +399,9 @@ fun EngineScreen(
                     engineState = EngineUiState.ERROR
                     return@launch
                 }
-                if (descriptor.kind == ModelKind.LOCAL && !ensureLocalLoaded()) {
+                if (descriptor.kind == ModelKind.LOCAL &&
+                    !ensureLocalLoaded(localLibrary.resolve(descriptor.id))
+                ) {
                     return@launch
                 }
                 val provider = registry.providerFor(descriptor)
@@ -469,7 +547,7 @@ fun EngineScreen(
             Text(
                 if (selected == null) "tap to choose" else activeModelSummary(
                     selected,
-                    modelFile.exists(),
+                    selectedLocalFile != null,
                     providerRegistry.apiKey(selected.provider).isNotBlank(),
                 ),
                 color = OpTextSecondary,
@@ -480,6 +558,9 @@ fun EngineScreen(
         }
         Spacer(Modifier.height(8.dp))
         Text(status, color = OpTextSecondary, fontSize = 12.sp)
+        if (importing) {
+            Text(importStatus, color = OpAmber, fontSize = 11.sp)
+        }
         Spacer(Modifier.height(12.dp))
 
         // ---------------- PROMPT (primary interaction) ----------------
@@ -549,7 +630,7 @@ fun EngineScreen(
                 enabled = !running,
             ) {
                 scope.launch {
-                    if (selectedModelId == "local-llama" && !ensureLocalLoaded()) return@launch
+                    if (selected != null && selected.kind == ModelKind.LOCAL && !ensureLocalLoaded()) return@launch
                     runAgent(
                         context = context,
                         engine = engine,
@@ -562,6 +643,7 @@ fun EngineScreen(
                         modeLabel = modes[selectedMode],
                         preferredId = selectedModelId,
                         loaded = loaded,
+                        metrics = runtimeMetrics,
                         setRunning = { running = it },
                         setStatus = { status = it },
                         setOutput = { output = it },
@@ -688,10 +770,10 @@ fun EngineScreen(
                         connectionText = connText,
                         connectionColor = connColor,
                         localLoaded = loaded,
-                        modelFileExists = modelFile.exists(),
-                        modelFileSizeMb = if (modelFile.exists()) modelFile.length() / (1024L * 1024L) else null,
+                        modelFileExists = selectedLocalFile != null,
+                        modelFileSizeMb = selectedLocalFile?.let { f -> f.length() / (1024L * 1024L) },
                         networkAvailable = hasNetwork(context),
-                        quantTag = ModelStatus.quantTag(modelFile.name),
+                        quantTag = selectedLocalFile?.let { f -> ModelStatus.quantTag(f.name) },
                         onLoadLocal = {
                             scope.launch {
                                 engineState = EngineUiState.LOADING
@@ -704,6 +786,29 @@ fun EngineScreen(
                         onChange = {
                             showSettingsSheet = false
                             showPicker = true
+                        },
+                        onDeleteLocal = if (it.kind == ModelKind.LOCAL) {
+                            {
+                                scope.launch {
+                                    if (localLibrary.delete(it.id)) {
+                                        localModels = localLibrary.scan()
+                                        localLibrary.syncInto(
+                                            registry,
+                                            engine,
+                                            context.applicationInfo.nativeLibraryDir,
+                                            contextSize,
+                                        )
+                                        if (selectedModelId == it.id) {
+                                            selectedModelId = localModels.firstOrNull()?.id
+                                                ?: LocalModelProvider.LOCAL_MODEL_ID
+                                            prefs.lastSelectedModelId = selectedModelId
+                                        }
+                                        status = "Deleted ${it.displayName}"
+                                    }
+                                }
+                            }
+                        } else {
+                            null
                         },
                     )
                 }
@@ -925,7 +1030,7 @@ fun EngineScreen(
                         }
                     }
                 }
-                val dynPlan = MemoryPlanner.plan(modelFile.length(), contextSize, availableRamBytes(context))
+                val dynPlan = MemoryPlanner.plan(selectedLocalFile?.length() ?: 0L, contextSize, availableRamBytes(context))
                 Text(
                     "Dynamic budget: est. ${dynPlan.totalMb.toInt()} MB \u00b7 cap ${dynPlan.availableCapMb.toInt()} MB \u00b7 max ctx ${dynPlan.maxSafeNctx}",
                     color = if (dynPlan.withinBudget) OpTextSecondary else OpAmber,
@@ -960,28 +1065,14 @@ fun EngineScreen(
                 Spacer(Modifier.height(8.dp))
                 PillButton("Stats", Modifier.fillMaxWidth(), enabled = !running) {
                     scope.launch {
-                        if (!ensureLocalLoaded()) return@launch
-                        try {
-                            val s = engine.memoryStats()
-                            val budget = MemoryPlanner.plan(
-                                modelFile.length(), contextSize, availableRamBytes(context),
-                            )
-                            status = "model=${s.modelBytes / (1024 * 1024)} MB | ctx=${s.nCtx} | " +
-                                "kv=${s.kvTypeK}/${s.kvTypeV} | threads=${s.threads} | " +
-                                "gpu=${s.gpuLayers} | gpuOffload=${s.gpuOffloadSupported} | " +
-                                "rss=${s.rssBytes / (1024 * 1024)} MB" +
-                                (if (s.rssOverLimit) " | OVER 1.5GB LIMIT" else "") +
-                                " | affinity=${if (s.affinityApplied) "pinned" else "default"}" +
-                                " | budget=${budget.totalMb.toInt()}/${budget.availableCapMb.toInt()} MB " +
-                                "maxCtx=${budget.maxSafeNctx}"
-                        } catch (e: Exception) {
-                            status = "stats failed: ${e.message}"
-                        }
+                        jankMonitor.flush()
+                        diagnosticsSnapshot = diagnostics.snapshot()
+                        showDiagnostics = true
                     }
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Service keeps the engine alive in the background \u00b7 Download fetches a GGUF to ${modelFile.name}",
+                    "Service keeps the engine alive in the background \u00b7 Download fetches a GGUF to ${downloadTarget.name}",
                     color = OpTextSecondary,
                     fontSize = 10.sp,
                 )
@@ -996,6 +1087,10 @@ fun EngineScreen(
             selectedId = selectedModelId,
             lastUpdated = registry.lastRefreshMs,
             favorites = favorites,
+            localEntries = localModels,
+            onPickLocal = {
+                pickLocalLauncher.launch(arrayOf("*/*"))
+            },
             onSelect = { d ->
                 selectedModelId = d.id
                 prefs.lastSelectedModelId = d.id
@@ -1068,7 +1163,7 @@ fun EngineScreen(
                     downloading = true
                     downloadProgress = null
                     downloadStatus = "connecting\u2026"
-                    val result = ModelDownloader(modelFile).download(
+                    val result = ModelDownloader(downloadTarget).download(
                         url = url,
                         onProgress = { done, total ->
                             downloadProgress = if (total != null && total > 0) {
@@ -1085,8 +1180,17 @@ fun EngineScreen(
                     when (result) {
                         is DownloadResult.Success -> {
                             downloadProgress = 1f
-                            downloadStatus = "saved ${modelFile.name} (${result.bytes / (1024 * 1024)} MB) \u2014 tap Load Model"
-                            status = "Model downloaded: ${modelFile.name} \u2014 tap Load Model"
+                            localModels = localLibrary.scan()
+                            localLibrary.syncInto(
+                                registry,
+                                engine,
+                                context.applicationInfo.nativeLibraryDir,
+                                contextSize,
+                            )
+                            selectedModelId = LocalModelProvider.LOCAL_MODEL_ID
+                            prefs.lastSelectedModelId = selectedModelId
+                            downloadStatus = "saved ${downloadTarget.name} (${result.bytes / (1024 * 1024)} MB) \u2014 tap Load Model"
+                            status = "Model downloaded: ${downloadTarget.name} \u2014 tap Load Model"
                         }
                         is DownloadResult.Error -> {
                             downloadStatus = "failed: ${result.message}"
@@ -1101,13 +1205,102 @@ fun EngineScreen(
             },
         )
     }
+
+    if (showDiagnostics) {
+        DiagnosticsDialog(
+            snapshot = diagnosticsSnapshot,
+            serviceState = serviceState.name,
+            onClear = {
+                runtimeMetrics.reset()
+                diagnosticsSnapshot = null
+                status = "runtime metrics cleared"
+            },
+            onDismiss = { showDiagnostics = false },
+        )
+    }
+}
+
+/** Diagnostics panel: real measured values, never guessed (spec §16/§21). */
+@Composable
+private fun DiagnosticsDialog(
+    snapshot: DiagnosticsSnapshot?,
+    serviceState: String,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val lines = snapshot?.let { snap ->
+        val m = snap.metrics
+        val toolsLine = if (m.tools.isEmpty()) {
+            "none"
+        } else {
+            m.tools.entries.joinToString(" \u00b7 ") { (tool, tm) ->
+                val fail = if (tm.failures > 0) ", ${tm.failures} fail" else ""
+                "$tool \u00d7${tm.calls} (${tm.totalMs} ms$fail)"
+            }
+        }
+        val tps = m.tokensPerSec?.let { "%.1f tok/s".format(it) } ?: "n/a"
+        val rssLine = "RSS          ${snap.rssBytes / (1024 * 1024)} MB / " +
+            "${snap.ceilingBytes / (1024 * 1024)} MB" +
+            (if (snap.overLimit) " OVER LIMIT" else "")
+        val engineLine = "ENGINE       " +
+            (if (snap.engineLoaded) (snap.backend ?: "loaded") else "not loaded")
+        listOf(
+            "MODEL LOAD   ${m.modelLoadMs?.let { "$it ms" } ?: "n/a"}",
+            "FIRST TOKEN  ${m.firstTokenMs?.let { "$it ms" } ?: "n/a"}",
+            "LAST RUN     ${m.lastRunTokens} tok \u00b7 ${m.lastRunDurationMs} ms \u00b7 $tps",
+            "TOOLS        $toolsLine",
+            "ERRORS       ${m.errors} \u00b7 RETRIES ${m.retries}",
+            "RESTARTS     ${m.serviceRestarts}",
+            "JANK         ${m.droppedFrames} dropped \u00b7 ${m.jankyFrames} janky",
+            rssLine,
+            engineLine,
+            "SERVICE      $serviceState",
+        )
+    } ?: listOf("collecting\u2026")
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = OpBg,
+        title = { Text("DIAGNOSTICS", color = OpText, fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                lines.forEach { line ->
+                    Text(
+                        line,
+                        color = OpText,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(vertical = 1.dp),
+                    )
+                }
+                if (snapshot == null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("Run a task or load a model first.", color = OpTextSecondary, fontSize = 11.sp)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onClear, colors = ButtonDefaults.buttonColors(containerColor = OpCard)) {
+                Text("Clear")
+            }
+        },
+        dismissButton = {
+            Button(onClick = onDismiss) { Text("Close") }
+        },
+    )
 }
 
 /** One line of the agent step log: steps get a colored dot, metadata is
  *  indented, and raw text stays left-aligned. */
 @Composable
 private fun TraceLine(line: String) {
-    val t = line.trim()
+    val raw = line.trim()
+    // Structured trace lines carry an "HH:mm:ss " prefix; strip it before
+    // classifying so step colors keep working.
+    val t = if (raw.length >= 9 && raw[2] == ':' && raw[5] == ':') {
+        raw.substring(9).trim()
+    } else {
+        raw
+    }
     when {
         t.startsWith("[ERROR]") -> StepRow(t, OpRed)
         t.startsWith("[VERIFY]") -> StepRow(t, OpSuccess)
@@ -1170,6 +1363,7 @@ private fun runAgent(
     modeLabel: String,
     preferredId: String?,
     loaded: Boolean,
+    metrics: RuntimeMetrics,
     setRunning: (Boolean) -> Unit,
     setStatus: (String) -> Unit,
     setOutput: (String) -> Unit,
@@ -1214,14 +1408,25 @@ private fun runAgent(
             val steps = StringBuilder()
             val answer = StringBuilder()
             var done = false
+            var tokenCount = 0
+            var routedCount = 0
+            var toolName = ""
+            var toolStartedMs = 0L
+            val runStarted = System.currentTimeMillis()
+            val stampFmt = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
+            fun log(s: String) {
+                steps.appendLine(java.time.LocalTime.now().format(stampFmt) + " " + s)
+            }
             agent.run(prompt, GenerationConfig(maxTokens = 256)).collect { ev ->
                 when (ev) {
                     is AgentEvent.Token -> {
+                        tokenCount++
+                        metrics.recordFirstToken(System.currentTimeMillis() - runStarted)
                         answer.append(ev.text)
                         setAnswer(answer.toString())
                     }
                     is AgentEvent.Stage -> {
-                        steps.appendLine("[${ev.state}]")
+                        log("[${ev.state}]")
                         setOutput(steps.toString())
                         setEngineState(
                             when (ev.state) {
@@ -1233,32 +1438,44 @@ private fun runAgent(
                         )
                     }
                     is AgentEvent.Routed -> {
+                        routedCount++
+                        if (routedCount > 1) metrics.recordRetry()
                         val remote = ev.provider != "local"
-                        steps.appendLine("MODEL ${ev.modelId}")
-                        steps.appendLine("PROVIDER ${ev.provider}")
-                        steps.appendLine("MODE ${if (remote) "Remote (${modeLabel})" else modeLabel}")
-                        steps.appendLine("STATUS ${if (remote) "Running · remote request" else "Running · local"}")
-                        steps.appendLine("[${ev.taskType} | ${ev.costTier}]")
+                        log("MODEL ${ev.modelId}")
+                        log("PROVIDER ${ev.provider}")
+                        log("MODE ${if (remote) "Remote (${modeLabel})" else modeLabel}")
+                        log("STATUS ${if (remote) "Running \u00b7 remote request" else "Running \u00b7 local"}")
+                        log("[${ev.taskType} | ${ev.costTier}]")
                         setOutput(steps.toString())
                     }
                     is AgentEvent.ToolCall -> {
-                        steps.appendLine("[TOOL] ${ev.tool}(${ev.input})")
+                        toolName = ev.tool
+                        toolStartedMs = System.currentTimeMillis()
+                        log("[TOOL] ${ev.tool}(${ev.input})")
                         setOutput(steps.toString())
                         setEngineState(EngineUiState.TOOL)
                     }
                     is AgentEvent.Observation -> {
-                        steps.appendLine("[OBS] ${ev.output.take(240)}")
+                        if (toolName.isNotEmpty()) {
+                            metrics.recordTool(toolName, System.currentTimeMillis() - toolStartedMs, true)
+                            toolName = ""
+                        }
+                        log("[OBS] ${ev.output.take(240)}")
                         setOutput(steps.toString())
                     }
                     is AgentEvent.Verification -> {
-                        steps.appendLine("[VERIFY] ${ev.tool}: " +
+                        if (!ev.passed && toolName.isNotEmpty()) {
+                            metrics.recordTool(toolName, 0L, false)
+                            toolName = ""
+                        }
+                        log("[VERIFY] ${ev.tool}: " +
                             if (ev.passed) "passed" else "failed")
                         setOutput(steps.toString())
                         setEngineState(EngineUiState.VERIFYING)
                     }
                     is AgentEvent.Final -> {
                         done = true
-                        steps.appendLine("[FINAL]")
+                        log("[FINAL]")
                         answer.setLength(0)
                         answer.append(ev.answer)
                         if (sessionId != null) {
@@ -1273,13 +1490,15 @@ private fun runAgent(
                         setEngineState(EngineUiState.COMPLETED)
                     }
                     is AgentEvent.Error -> {
-                        steps.appendLine("[ERROR] ${ev.message}")
+                        metrics.recordError()
+                        log("[ERROR] ${ev.message}")
                         setOutput(steps.toString())
                         setStatus("agent error: ${ev.message}")
                         setEngineState(EngineUiState.ERROR)
                     }
                 }
             }
+            metrics.recordRun(tokenCount, System.currentTimeMillis() - runStarted)
             setStatus(if (done) "agent done" else "agent ended without final answer")
             if (!done) setEngineState(EngineUiState.READY)
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1416,6 +1635,7 @@ private fun ModelCard(
     quantTag: String?,
     onLoadLocal: () -> Unit,
     onChange: () -> Unit,
+    onDeleteLocal: (() -> Unit)? = null,
 ) {
     Column(
         Modifier
@@ -1502,12 +1722,22 @@ private fun ModelCard(
                     )
                     modelFileExists -> PillButton("Load", Modifier.weight(1f)) { onLoadLocal() }
                     else -> Text(
-                        "No model file \u2014 download one below",
+                        "No model file \u2014 download or import one",
                         color = OpTextSecondary,
                         fontSize = 11.sp,
                         modifier = Modifier
                             .weight(1f)
                             .padding(top = 8.dp),
+                    )
+                }
+                if (d.kind == ModelKind.LOCAL && onDeleteLocal != null) {
+                    Text(
+                        "Delete",
+                        color = OpRed,
+                        fontSize = 11.sp,
+                        modifier = Modifier
+                            .padding(top = 6.dp, start = 4.dp, end = 8.dp)
+                            .clickable(onClick = onDeleteLocal),
                     )
                 }
                 Spacer(Modifier.width(8.dp))

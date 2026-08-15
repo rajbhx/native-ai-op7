@@ -34,7 +34,7 @@ object RemoteProviderBootstrap {
         providerRegistry: ProviderRegistry,
         id: String?,
     ) {
-        if (id.isNullOrBlank() || id == LocalModelProvider.LOCAL_MODEL_ID) return
+        if (id.isNullOrBlank() || id.startsWith("local-")) return
         if (registry.get(id) == null) {
             registry.addDescriptor(ModelCatalog.zenDescriptor(id))
         }

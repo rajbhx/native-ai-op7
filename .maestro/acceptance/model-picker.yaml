@@ -1,0 +1,16 @@
+# Model picker mechanics: open picker, search, LOCAL import row (spec: picker).
+# Run on-device: maestro test .maestro/acceptance/model-picker.yaml
+appId: com.engine.nativeai
+---
+- launchApp
+- tapOn:
+    text: ".*Model.*"
+- tapOn: "Change"
+- assertVisible: "Pick a model"
+- assertVisible: "Search models\u2026"
+- tapOn: "Search models\u2026"
+- inputText: "deep"
+- assertVisible: "DeepSeek V4 Flash Free"
+- eraseText: 4
+- assertVisible: "LOCAL"
+- tapOn: "Close"
