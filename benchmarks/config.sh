@@ -8,6 +8,11 @@
 BENCH_PKG="com.engine.nativeai"
 BENCH_ACTIVITY="${BENCH_PKG}/.MainActivity"
 
+# Device transport: auto | adb | shizuku. auto prefers a real adb on PATH
+# (adb version reports "Android Debug Bridge"), otherwise falls back to the
+# shizuku wrapper (UID 2000, same identity as adb shell) for proot hosts.
+BENCH_TRANSPORT="${BENCH_TRANSPORT:-auto}"
+
 # logcat tag the app emits structured NATIVEAI_BENCH rows under.
 BENCH_TAG="NATIVEAI_BENCH"
 

@@ -5,7 +5,14 @@
 # config.sh (threads x context x gpu_layers), one cold activity launch per
 # cell, and appends one JSONL row per measured run to an output file.
 #
+# Transport: every device command routes through a `remote()` shim.
+#   - auto (default): prefer a real adb binary on PATH, else the shizuku
+#     wrapper (UID 2000, same identity as adb shell) for proot environments.
+#   - adb:      require a real adb (adb version reports Android Debug Bridge).
+#   - shizuku:  require the shizuku wrapper (device-local, no serial).
+#
 # Usage: benchmarks/sweep.sh [--run-id ID] [--label idle|contended]
+#                            [--transport auto|adb|shizuku]
 #                            [--apk PATH] [--adb SERIAL] [--out PATH]
 #                            [--threads "2 3 4 6"] [--ctx "512 1024 2048"]
 #                            [--gpu-layers "0"] [--tokens N]
@@ -39,19 +46,14 @@ POLL_INTERVAL_S="$BENCH_POLL_INTERVAL_S"
 die() { echo "error: $*" >&2; exit 1; }
 
 usage() {
-    sed -n '2,16p' "$0" | sed 's/^# \?//'
-}
-
-adbs() {
-    local -a args=()
-    if [ -n "$ADB_SERIAL" ]; then args+=("-s" "$ADB_SERIAL"); fi
-    adb "${args[@]}" "$@"
+    sed -n '2,22p' "$0" | sed 's/^# \?//'
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --run-id) RUN_ID="${2:?missing value}"; shift 2 ;;
         --label) LABEL="${2:?missing value}"; shift 2 ;;
+        --transport) BENCH_TRANSPORT="${2:?missing value}"; shift 2 ;;
         --apk) APK_PATH="${2:?missing value}"; shift 2 ;;
         --out) OUT_FILE="${2:?missing value}"; shift 2 ;;
         --adb) ADB_SERIAL="${2:?missing value}"; shift 2 ;;
@@ -73,6 +75,51 @@ case "$LABEL" in
     *) die "--label must be idle or contended (playbook 07 labeling rule)" ;;
 esac
 
+# ---- transport resolution -------------------------------------------------
+
+TRANSPORT=""
+resolve_transport() {
+    case "$BENCH_TRANSPORT" in
+        auto)
+            if command -v adb >/dev/null 2>&1 &&
+                adb version 2>/dev/null | grep -q "Android Debug Bridge"; then
+                TRANSPORT=adb
+            elif command -v shizuku >/dev/null 2>&1; then
+                TRANSPORT=shizuku
+            else
+                die "no usable transport: need a real adb or the shizuku wrapper"
+            fi
+            ;;
+        adb)
+            command -v adb >/dev/null 2>&1 || die "--transport adb but adb is not on PATH"
+            TRANSPORT=adb
+            ;;
+        shizuku)
+            command -v shizuku >/dev/null 2>&1 || die "--transport shizuku but shizuku is not on PATH"
+            TRANSPORT=shizuku
+            ;;
+        *) die "--transport must be auto, adb or shizuku" ;;
+    esac
+}
+
+# Runs one command on the device with the resolved transport.
+remote() {
+    local -a args=()
+    case "$TRANSPORT" in
+        adb)
+            if [ -n "$ADB_SERIAL" ]; then args+=("-s" "$ADB_SERIAL"); fi
+            adb "${args[@]}" "$@"
+            ;;
+        shizuku)
+            shizuku "$@"
+            ;;
+        *) die "transport not resolved (bug)" ;;
+    esac
+}
+
+resolve_transport
+echo "transport: ${TRANSPORT}"
+
 if [ -z "$RUN_ID" ]; then RUN_ID="run-$(date -u +%Y%m%d-%H%M%S)"; fi
 if [ -z "$OUT_FILE" ]; then OUT_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/results/${RUN_ID}.jsonl"; fi
 mkdir -p "$(dirname "$OUT_FILE")"
@@ -87,48 +134,60 @@ for _th in $THREADS; do
 done
 
 if [ "$DRY_RUN" = 1 ]; then
-    echo "dry-run: matrix would run ${TOTAL_CELLS} cell(s) -> ${OUT_FILE}"
+    echo "dry-run: transport=${TRANSPORT} matrix would run ${TOTAL_CELLS} cell(s) -> ${OUT_FILE}"
     for _th in $THREADS; do
         for _c in $CTX_VALUES; do
             for _g in $GPU_LAYERS; do
-                echo "  am start -W -n ${BENCH_ACTIVITY} --es bench 1 --es threads ${_th} --es ctx ${_c} --es gpu_layers ${_g} --es bench_tokens ${TOKENS} --es bench_categories ${CATEGORIES}"
+                echo "  remote am start -W -n ${BENCH_ACTIVITY} --es bench 1 --es threads ${_th} --es ctx ${_c} --es gpu_layers ${_g} --es bench_tokens ${TOKENS} --es bench_categories ${CATEGORIES}"
             done
         done
     done
     exit 0
 fi
 
-command -v adb >/dev/null 2>&1 || die "adb not found on PATH"
-command -v python3 >/dev/null 2>&1 || die "python3 not found on PATH"
-
-mapfile -t DEVICES < <(adb devices | awk 'NR > 1 && $2 == "device" { print $1 }')
-if [ -n "$ADB_SERIAL" ]; then
-    case " ${DEVICES[*]} " in
-        *" $ADB_SERIAL "*) ;;
-        *) die "serial $ADB_SERIAL is not an attached adb device" ;;
-    esac
-elif [ "${#DEVICES[@]}" -eq 1 ]; then
-    ADB_SERIAL="${DEVICES[0]}"
-elif [ "${#DEVICES[@]}" -gt 1 ]; then
-    die "multiple adb devices attached; pick one with --adb <serial>: ${DEVICES[*]}"
-else
-    die "no adb device attached"
+if [ "$TRANSPORT" = shizuku ] && [ -n "$APK_PATH" ]; then
+    die "--apk install needs the adb transport (shizuku cannot push); install the CI debug APK on the device instead"
 fi
 
-DEVICE_SERIAL="$(adbs shell getprop ro.serialno | tr -d '\r' || true)"
-DEVICE_MODEL="$(adbs shell getprop ro.product.model | tr -d '\r' || true)"
-ANDROID_RELEASE="$(adbs shell getprop ro.build.version.release | tr -d '\r' || true)"
+# ---- device checks --------------------------------------------------------
+
+if [ "$TRANSPORT" = adb ]; then
+    mapfile -t DEVICES < <(adb devices | awk 'NR > 1 && $2 == "device" { print $1 }')
+    if [ -n "$ADB_SERIAL" ]; then
+        case " ${DEVICES[*]} " in
+            *" $ADB_SERIAL "*) ;;
+            *) die "serial $ADB_SERIAL is not an attached adb device" ;;
+        esac
+    elif [ "${#DEVICES[@]}" -eq 1 ]; then
+        ADB_SERIAL="${DEVICES[0]}"
+    elif [ "${#DEVICES[@]}" -gt 1 ]; then
+        die "multiple adb devices attached; pick one with --adb <serial>: ${DEVICES[*]}"
+    else
+        die "no adb device attached"
+    fi
+else
+    if [ -n "$ADB_SERIAL" ]; then
+        echo "note: --adb serial ignored (shizuku transport is device-local)"
+    fi
+    if ! remote getprop ro.serialno 2>/dev/null | tr -d '\r' | grep -q .; then
+        die "shizuku not reachable (getprop returned nothing; is Shizuku running?)"
+    fi
+fi
+
+DEVICE_SERIAL="$(remote getprop ro.serialno | tr -d '\r' || true)"
+DEVICE_MODEL="$(remote getprop ro.product.model | tr -d '\r' || true)"
+ANDROID_RELEASE="$(remote getprop ro.build.version.release | tr -d '\r' || true)"
 
 APK_SHA=""
 if [ -n "$APK_PATH" ]; then
     [ -f "$APK_PATH" ] || die "apk not found: $APK_PATH"
     APK_SHA="$(sha256sum "$APK_PATH" | awk '{ print $1 }')"
-    echo "installing ${APK_PATH} (${APK_SHA:0:12}) on ${DEVICE_SERIAL}"
-    adbs install -r "$APK_PATH"
+    echo "installing ${APK_PATH} (${APK_SHA:0:12}) on ${ADB_SERIAL:-device}"
+    remote install -r "$APK_PATH"
 fi
 
-if [ -z "$(adbs shell pm path "$BENCH_PKG" | tr -d '\r')" ]; then
-    die "app ${BENCH_PKG} is not installed; install it (--apk or the in-app GGUF downloader)"
+if [ -z "$(remote pm path "$BENCH_PKG" | tr -d '\r')" ]; then
+    die "app ${BENCH_PKG} is not installed; install it (--apk with adb transport, or the in-app GGUF downloader)"
 fi
 
 # Header row: run metadata so every result file is self-describing.
@@ -136,7 +195,9 @@ RUN_ID="$RUN_ID" DEVICE_MODEL="$DEVICE_MODEL" DEVICE_SERIAL="$DEVICE_SERIAL" \
 ANDROID_RELEASE="$ANDROID_RELEASE" LABEL="$LABEL" THREADS="$THREADS" \
 CTX_VALUES="$CTX_VALUES" GPU_LAYERS="$GPU_LAYERS" TOKENS="$TOKENS" \
 CATEGORIES="$CATEGORIES" REPEATS="$REPEATS" APK_SHA="$APK_SHA" \
+TRANSPORT="$TRANSPORT" \
 python3 - >>"$OUT_FILE" <<'PY'
+import datetime
 import json
 import os
 
@@ -153,11 +214,10 @@ meta = {
     "tokens": int(os.environ["TOKENS"]),
     "categories": os.environ["CATEGORIES"],
     "repeats": int(os.environ["REPEATS"]),
+    "transport": os.environ["TRANSPORT"],
     "apk_sha256": os.environ["APK_SHA"],
-    "date_utc": None,  # replaced below to keep output deterministic for tests
+    "date_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
 }
-import datetime
-meta["date_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 print(json.dumps(meta, sort_keys=True))
 PY
 
@@ -173,22 +233,22 @@ for th in $THREADS; do
                 echo "== cell ${cell} (${run_id}) =="
 
                 # 1) force-stop, then verify the pid is really gone.
-                adbs shell am force-stop "$BENCH_PKG"
+                remote am force-stop "$BENCH_PKG"
                 for ((i = 0; i < 10; i++)); do
-                    pid="$(adbs shell pidof "$BENCH_PKG" | tr -d '\r' || true)"
+                    pid="$(remote pidof "$BENCH_PKG" | tr -d '\r' || true)"
                     [ -z "$pid" ] && break
                     sleep 1
                 done
-                pid="$(adbs shell pidof "$BENCH_PKG" | tr -d '\r' || true)"
+                pid="$(remote pidof "$BENCH_PKG" | tr -d '\r' || true)"
                 if [ -n "$pid" ]; then
                     echo "  warn: force-stop did not stop ${BENCH_PKG} (pid=${pid}); continuing"
                 fi
 
                 # 2) fresh logcat so rows from previous cells never leak in.
-                adbs logcat -c
+                remote logcat -c
 
                 # 3) cold launch with the cell config.
-                start_out="$(adbs shell am start -W -n "$BENCH_ACTIVITY" \
+                start_out="$(remote am start -W -n "$BENCH_ACTIVITY" \
                     --es bench 1 --es run_id "$run_id" \
                     --es threads "$th" --es ctx "$ctx_n" --es gpu_layers "$gl" \
                     --es bench_tokens "$TOKENS" --es bench_categories "$CATEGORIES" || true)"
@@ -199,7 +259,7 @@ for th in $THREADS; do
 
                 # 4) best-effort whole-app PSS while the bench is running.
                 pss_kb=""
-                if pss_out="$(adbs shell dumpsys meminfo "$BENCH_PKG" 2>/dev/null)"; then
+                if pss_out="$(remote dumpsys meminfo "$BENCH_PKG" 2>/dev/null)"; then
                     pss_kb="$(printf '%s\n' "$pss_out" | tr -d '\r' |
                         awk '/^TOTAL PSS:/ { print $3; exit } /^TOTAL[[:space:]]+[0-9]/ { print $2; exit }')"
                 fi
@@ -208,7 +268,7 @@ for th in $THREADS; do
                 done_row=""
                 polls=$((CELL_TIMEOUT_S / POLL_INTERVAL_S))
                 for ((i = 0; i < polls; i++)); do
-                    done_row="$(adbs logcat -d -s "$BENCH_TAG:I" 2>/dev/null |
+                    done_row="$(remote logcat -d -s "$BENCH_TAG:I" 2>/dev/null |
                         grep "\"run_id\":\"${run_id}\"" | grep '"kind":"done"' | tail -1 || true)"
                     [ -n "$done_row" ] && break
                     sleep "$POLL_INTERVAL_S"
@@ -222,7 +282,7 @@ for th in $THREADS; do
                 fi
 
                 # 6) copy this cell's structured rows (bench + cell metadata).
-                adbs logcat -d -s "$BENCH_TAG:I" 2>/dev/null |
+                remote logcat -d -s "$BENCH_TAG:I" 2>/dev/null |
                     grep "\"run_id\":\"${run_id}\"" |
                     sed -E 's/^.*NATIVEAI_BENCH: //' |
                     tr -d '\r' >>"$OUT_FILE"

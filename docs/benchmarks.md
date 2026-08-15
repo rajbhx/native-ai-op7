@@ -81,3 +81,22 @@ After every measured sweep: commit `benchmarks/results/<run-id>.jsonl`, add a
 session digest under `docs/field-notes/sessions/`, update
 `docs/field-notes/log.yml` (A27+) for any problem hit, and flip the ROADMAP
 Phase 7/8 status once the sweep + regression gate are green.
+
+## Device transport
+
+`sweep.sh` routes every device command (`am`, `pm`, `dumpsys`, `logcat`,
+`getprop`, `pidof`) through a `remote()` shim. Resolution:
+
+- `--transport auto` (default): prefers a real `adb` on PATH — detected via
+  `adb version` reporting "Android Debug Bridge" — and otherwise falls back
+  to the `shizuku` wrapper (UID 2000, the same identity as `adb shell`, so
+  behavior is equivalent). This is the mode used on the OP7 proot host,
+  where only the Shizuku transport is reachable.
+- `--transport adb`: forces the adb transport (`--adb <serial>` applies).
+- `--transport shizuku`: forces the shizuku wrapper (device-local; `--adb`
+  serial is ignored).
+
+Caveats: `--apk PATH` installs via adb only — under shizuku, install the CI
+debug APK on the device first (e.g. with the persistent-keystore build) and
+omit `--apk`. Override the default with `BENCH_TRANSPORT` env var. Example on
+this device: `benchmarks/sweep.sh --transport shizuku --label contended ...`.
