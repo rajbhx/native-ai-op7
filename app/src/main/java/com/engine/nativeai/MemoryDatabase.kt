@@ -17,7 +17,8 @@ import kotlinx.coroutines.withContext
  * Hybrid retrieval: FTS5/BM25 candidates -> utility + recency ranking -> Top-K.
  */
 class MemoryDatabase(context: Context) :
-    SQLiteOpenHelper(context, "memory.db", null, SCHEMA_VERSION) {
+    SQLiteOpenHelper(context, "memory.db", null, SCHEMA_VERSION),
+    SourceStore {
 
     /** False when the platform SQLite lacks the FTS5 module (seen on OP7/OxygenOS
      *  Android 10: "no such module: fts5"); retrieval falls back to LIKE matching. */
@@ -41,7 +42,7 @@ class MemoryDatabase(context: Context) :
     }
 
     companion object {
-        private const val SCHEMA_VERSION = 3
+        private const val SCHEMA_VERSION = SourceSchema.SCHEMA_VERSION
         private const val DEFAULT_TOP_K = 3  // spec: Top K = 3 default
         private const val DAY_MS = 86_400_000L
         private const val RECENCY_WINDOW_DAYS = 30.0
@@ -153,18 +154,25 @@ class MemoryDatabase(context: Context) :
                 created INTEGER NOT NULL
             )""",
         )
+        createSourceSchema(db)
+    }
+
+    /** Schema v4 additions (roadmap Phase 4/5); DDL shared with JVM tests. */
+    private fun createSourceSchema(db: SQLiteDatabase) {
+        SourceSchema.DDL.forEach { db.execSQL(it) }
+        try {
+            SourceSchema.FTS_DDL.forEach { db.execSQL(it) }
+        } catch (e: SQLiteException) {
+            // OEM SQLite without the fts5 module (OP7/OxygenOS 10): source
+            // search falls back to LIKE like experiences do (A27 regression).
+            ftsAvailable = false
+        }
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Dev-only reset until real migrations arrive (phase 8 hardening).
-        db.execSQL("DROP TABLE IF EXISTS experiences_fts")
-        db.execSQL("DROP TABLE IF EXISTS experiences")
-        db.execSQL("DROP TABLE IF EXISTS semantic_facts")
-        db.execSQL("DROP TABLE IF EXISTS tool_results")
-        db.execSQL("DROP TABLE IF EXISTS memory_scores")
-        db.execSQL("DROP TABLE IF EXISTS sessions")
-        db.execSQL("DROP TABLE IF EXISTS messages")
-        onCreate(db)
+        // Real migrations only — never drop user data. v3->v4 keeps every
+        // existing table and adds the source knowledge base.
+        if (oldVersion < 4) createSourceSchema(db)
     }
 
     // ------------------------------------------------------------------
@@ -414,8 +422,317 @@ class MemoryDatabase(context: Context) :
     }
 
     // ------------------------------------------------------------------
+    // Source Knowledge Base (schema v4, roadmap Phase 4-6)
+    // ------------------------------------------------------------------
+
+    @Synchronized
+    override fun upsertSourceCollection(name: String): Long {
+        val db = writableDatabase
+        db.insertWithOnConflict(
+            "source_collections", null,
+            ContentValues().apply {
+                put("name", name)
+                put("created", System.currentTimeMillis())
+            },
+            SQLiteDatabase.CONFLICT_IGNORE,
+        )
+        return db.rawQuery(
+            "SELECT id FROM source_collections WHERE name = ?", arrayOf(name),
+        ).use { c -> if (c.moveToFirst()) c.getLong(0) else -1L }
+    }
+
+    override fun collections(): List<SourceCollection> =
+        readableDatabase.rawQuery(
+            "SELECT * FROM source_collections ORDER BY name ASC", null,
+        ).use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        SourceCollection(
+                            id = c.getLong(c.getColumnIndexOrThrow("id")),
+                            name = c.getString(c.getColumnIndexOrThrow("name")),
+                            created = c.getLong(c.getColumnIndexOrThrow("created")),
+                        ),
+                    )
+                }
+            }
+        }
+
+    override fun sources(): List<Source> =
+        readableDatabase.rawQuery(
+            "SELECT * FROM sources ORDER BY title ASC", null,
+        ).use { c -> buildList { while (c.moveToNext()) add(c.toSource()) } }
+
+    override fun sourceById(id: Long): Source? =
+        readableDatabase.rawQuery(
+            "SELECT * FROM sources WHERE id = ?", arrayOf(id.toString()),
+        ).use { c -> if (c.moveToFirst()) c.toSource() else null }
+
+    override fun sourceByTitle(title: String): Source? =
+        readableDatabase.rawQuery(
+            "SELECT * FROM sources WHERE title = ?", arrayOf(title),
+        ).use { c -> if (c.moveToFirst()) c.toSource() else null }
+
+    @Synchronized
+    override fun saveSource(s: Source): Long {
+        val db = writableDatabase
+        val existing = if (s.id > 0) sourceById(s.id) else sourceByTitle(s.title)
+        return if (existing != null) {
+            db.update("sources", s.toValues(), "id = ?", arrayOf(existing.id.toString()))
+            existing.id
+        } else {
+            val id = db.insertOrThrow("sources", null, s.toValues())
+            touchSourceRead(id)
+            id
+        }
+    }
+
+    @Synchronized
+    override fun deleteSource(id: Long) {
+        writableDatabase.execSQL("DELETE FROM source_chunks WHERE source_id = ?", arrayOf(id.toString()))
+        writableDatabase.execSQL("DELETE FROM source_files WHERE source_id = ?", arrayOf(id.toString()))
+        writableDatabase.execSQL("DELETE FROM sources WHERE id = ?", arrayOf(id.toString()))
+    }
+
+    override fun sourceFiles(sourceId: Long): List<SourceFile> =
+        readableDatabase.rawQuery(
+            "SELECT * FROM source_files WHERE source_id = ? ORDER BY path ASC",
+            arrayOf(sourceId.toString()),
+        ).use { c -> buildList { while (c.moveToNext()) add(c.toSourceFile()) } }
+
+    @Synchronized
+    override fun upsertSourceFile(f: SourceFile): Long {
+        val db = writableDatabase
+        val existing = db.rawQuery(
+            "SELECT id FROM source_files WHERE source_id = ? AND path = ?",
+            arrayOf(f.sourceId.toString(), f.path),
+        ).use { c -> if (c.moveToFirst()) c.getLong(0) else -1L }
+        return if (existing > 0) {
+            db.update("source_files", f.toValues(), "id = ?", arrayOf(existing.toString()))
+            existing
+        } else {
+            db.insertOrThrow("source_files", null, f.toValues())
+        }
+    }
+
+    @Synchronized
+    override fun deleteSourceFile(fileId: Long) {
+        writableDatabase.execSQL("DELETE FROM source_chunks WHERE source_file_id = ?", arrayOf(fileId.toString()))
+        writableDatabase.execSQL("DELETE FROM source_files WHERE id = ?", arrayOf(fileId.toString()))
+    }
+
+    /** Replaces a file's chunks (changed-blob-only re-chunking, uBO model). */
+    @Synchronized
+    override fun replaceSourceChunks(sourceId: Long, fileId: Long, chunks: List<String>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.execSQL("DELETE FROM source_chunks WHERE source_file_id = ?", arrayOf(fileId.toString()))
+            chunks.forEachIndexed { i, content ->
+                db.insertOrThrow(
+                    "source_chunks", null,
+                    ContentValues().apply {
+                        put("source_id", sourceId)
+                        put("source_file_id", fileId)
+                        put("chunk_index", i)
+                        put("content", content)
+                    },
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    @Synchronized
+    override fun touchSourceRead(sourceId: Long) {
+        writableDatabase.execSQL(
+            "UPDATE sources SET read_time = ? WHERE id = ?",
+            arrayOf<Any>(System.currentTimeMillis(), sourceId),
+        )
+    }
+
+    @Synchronized
+    override fun touchSourceWrite(
+        sourceId: Long,
+        revision: String?,
+        etag: String?,
+        lastModified: String?,
+        status: SourceStatus,
+        fileCount: Int,
+        sizeBytes: Long,
+    ) {
+        writableDatabase.execSQL(
+            """UPDATE sources SET revision = ?, etag = ?, last_modified = ?,
+               write_time = ?, last_updated = ?, status = ?, file_count = ?,
+               size_bytes = ? WHERE id = ?""",
+            arrayOf<Any>(
+                revision, etag, lastModified,
+                System.currentTimeMillis(), System.currentTimeMillis(),
+                status.name, fileCount, sizeBytes, sourceId,
+            ),
+        )
+    }
+
+    @Synchronized
+    override fun markSourceError(sourceId: Long, message: String) {
+        writableDatabase.execSQL(
+            """UPDATE sources SET status = ?, error = ?, last_updated = ? WHERE id = ?""",
+            arrayOf<Any>(SourceStatus.ERROR.name, message.take(500), System.currentTimeMillis(), sourceId),
+        )
+    }
+
+    /** uBO-style read-time LRU eviction: drop least-recently-read sources. */
+    @Synchronized
+    override fun evictSources(keep: Int = SourceCapabilities.EVICT_KEEP): Int {
+        val db = writableDatabase
+        val total = db.rawQuery("SELECT COUNT(*) FROM sources", null).use { c ->
+            if (c.moveToFirst()) c.getLong(0) else 0L
+        }
+        val excess = total - keep
+        if (excess <= 0) return 0
+        val doomed = db.rawQuery(
+            "SELECT id FROM sources ORDER BY read_time ASC LIMIT ?",
+            arrayOf(excess.toString()),
+        ).use { c ->
+            buildList { while (c.moveToNext()) add(c.getLong(0)) }
+        }
+        doomed.forEach { deleteSource(it) }
+        return doomed.size
+    }
+
+    override fun searchSources(query: String, limit: Int = 5): List<SourceSearchHit> {
+        val terms = query.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (terms.isEmpty()) return emptyList()
+        return if (ftsAvailable) ftsSourceSearch(terms, limit) else likeSourceSearch(terms, limit)
+    }
+
+    /** BM25 over source_chunks_fts when the platform SQLite has fts5. */
+    private fun ftsSourceSearch(terms: List<String>, limit: Int): List<SourceSearchHit> {
+        val match = terms.joinToString(" OR ") { "\"" + it.replace("\"", "").replace("*", "") + "\"" }
+        if (match.isBlank()) return emptyList()
+        val cursor = readableDatabase.rawQuery(
+            SourceSchema.FTS_SEARCH_SQL,
+            arrayOf(match, limit.toString()),
+        )
+        return cursor.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        SourceSearchHit(
+                            sourceTitle = c.getString(c.getColumnIndexOrThrow("title")),
+                            filePath = c.getString(c.getColumnIndexOrThrow("path")),
+                            content = c.getString(c.getColumnIndexOrThrow("content")),
+                            score = c.getFloat(c.getColumnIndexOrThrow("bm25_rank")),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    /** LIKE fallback (OP7/OxygenOS 10 without fts5): term-hit ranking. */
+    private fun likeSourceSearch(terms: List<String>, limit: Int): List<SourceSearchHit> {
+        val hits = mutableListOf<SourceSearchHit>()
+        val cursor = readableDatabase.rawQuery(
+            "SELECT * FROM source_chunks ORDER BY id DESC LIMIT 5000", null,
+        )
+        cursor.use { c ->
+            while (c.moveToNext()) {
+                val chunk = c.toSourceChunk()
+                val hitsHere = terms.count { chunk.content.contains(it, ignoreCase = true) }
+                if (hitsHere > 0) {
+                    hits += SourceSearchHit(
+                        sourceTitle = sourceById(chunk.sourceId)?.title ?: "?",
+                        filePath = sourceFileTitle(chunk.sourceFileId),
+                        content = chunk.content,
+                        score = -hitsHere.toFloat(),
+                    )
+                }
+            }
+        }
+        return hits.sortedBy { it.score }.take(limit)
+    }
+
+    private fun sourceFileTitle(fileId: Long): String =
+        readableDatabase.rawQuery(
+            "SELECT path FROM source_files WHERE id = ?", arrayOf(fileId.toString()),
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else "?" }
+
+    private fun Source.toValues(): ContentValues = ContentValues().apply {
+        put("collection_id", collectionId)
+        put("title", title)
+        put("type", type.name)
+        put("content_url", contentUrl)
+        put("owner", owner)
+        put("repo", repo)
+        put("revision", revision)
+        put("etag", etag)
+        put("last_modified", lastModified)
+        put("write_time", writeTime)
+        put("read_time", readTime)
+        put("update_after_hours", updateAfterHours)
+        put("status", status.name)
+        put("error", error)
+        put("file_count", fileCount)
+        put("last_updated", lastUpdated)
+        put("size_bytes", sizeBytes)
+    }
+
+    private fun SourceFile.toValues(): ContentValues = ContentValues().apply {
+        put("source_id", sourceId)
+        put("path", path)
+        put("blob_sha", blobSha)
+        put("chunked", if (chunked) 1 else 0)
+        put("size_bytes", sizeBytes)
+    }
+
+    private fun Cursor.toSource(): Source = Source(
+        id = getLong(getColumnIndexOrThrow("id")),
+        collectionId = getLong(getColumnIndexOrThrow("collection_id")),
+        title = getString(getColumnIndexOrThrow("title")),
+        type = SourceType.valueOf(getString(getColumnIndexOrThrow("type"))),
+        contentUrl = getStringOrNull("content_url"),
+        owner = getStringOrNull("owner"),
+        repo = getStringOrNull("repo"),
+        revision = getStringOrNull("revision"),
+        etag = getStringOrNull("etag"),
+        lastModified = getStringOrNull("last_modified"),
+        writeTime = getLong(getColumnIndexOrThrow("write_time")),
+        readTime = getLong(getColumnIndexOrThrow("read_time")),
+        updateAfterHours = getLong(getColumnIndexOrThrow("update_after_hours")),
+        status = SourceStatus.valueOf(getString(getColumnIndexOrThrow("status"))),
+        error = getStringOrNull("error"),
+        fileCount = getInt(getColumnIndexOrThrow("file_count")),
+        lastUpdated = getLong(getColumnIndexOrThrow("last_updated")),
+        sizeBytes = getLong(getColumnIndexOrThrow("size_bytes")),
+    )
+
+    private fun Cursor.toSourceFile(): SourceFile = SourceFile(
+        id = getLong(getColumnIndexOrThrow("id")),
+        sourceId = getLong(getColumnIndexOrThrow("source_id")),
+        path = getString(getColumnIndexOrThrow("path")),
+        blobSha = getStringOrNull("blob_sha"),
+        chunked = getInt(getColumnIndexOrThrow("chunked")) == 1,
+        sizeBytes = getLong(getColumnIndexOrThrow("size_bytes")),
+    )
+
+    private fun Cursor.toSourceChunk(): SourceChunk = SourceChunk(
+        id = getLong(getColumnIndexOrThrow("id")),
+        sourceId = getLong(getColumnIndexOrThrow("source_id")),
+        sourceFileId = getLong(getColumnIndexOrThrow("source_file_id")),
+        chunkIndex = getInt(getColumnIndexOrThrow("chunk_index")),
+        content = getString(getColumnIndexOrThrow("content")),
+    )
+
+    private fun Cursor.getStringOrNull(col: String): String? =
+        if (isNull(getColumnIndexOrThrow(col))) null else getString(getColumnIndexOrThrow(col))
+
+    // ------------------------------------------------------------------
     // Maintenance (async — spec §10)
     // ------------------------------------------------------------------
+
 
     suspend fun decayUnusedMemories() = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()

@@ -69,4 +69,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    // JVM twin of the Android SQLite store for source KB tests (test-only;
+    // does not affect the APK). Bundles FTS5 like modern platform SQLite.
+    testImplementation("org.xerial:sqlite-jdbc:3.45.1.0")
 }

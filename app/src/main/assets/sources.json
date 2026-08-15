@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "collection": "Android",
+      "title": "Termux",
+      "type": "GITHUB_REPO",
+      "owner": "termux",
+      "repo": "termux-app",
+      "updateAfterHours": 24
+    },
+    {
+      "collection": "AI",
+      "title": "llama.cpp",
+      "type": "GITHUB_REPO",
+      "owner": "ggerganov",
+      "repo": "llama.cpp",
+      "updateAfterHours": 24
+    },
+    {
+      "collection": "AI",
+      "title": "LiteRT",
+      "type": "GITHUB_REPO",
+      "owner": "google-ai-edge",
+      "repo": "litert",
+      "updateAfterHours": 48
+    },
+    {
+      "collection": "My Projects",
+      "title": "OP7 Special Build Playbook",
+      "type": "GITHUB_REPO",
+      "owner": "rajbhx",
+      "repo": "op7-special-build-playbook",
+      "updateAfterHours": 12
+    }
+  ]
+}

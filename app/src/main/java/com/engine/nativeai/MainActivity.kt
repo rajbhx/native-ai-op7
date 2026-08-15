@@ -10,6 +10,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import com.engine.nativeai.ui.EngineScreen
 import com.engine.nativeai.ui.MemoryScreen
+import com.engine.nativeai.ui.SourcesScreen
 import com.engine.nativeai.ui.OxygenOSTheme
 import java.io.File
 
@@ -51,11 +52,15 @@ class MainActivity : ComponentActivity() {
         setContent {
             OxygenOSTheme {
                 var showMemory by rememberSaveable { mutableStateOf(false) }
-                BackHandler(enabled = showMemory) { showMemory = false }
-                if (showMemory) {
-                    MemoryScreen(onBack = { showMemory = false })
-                } else {
-                    EngineScreen(
+                var showSources by rememberSaveable { mutableStateOf(false) }
+                BackHandler(enabled = showMemory || showSources) {
+                    showMemory = false
+                    showSources = false
+                }
+                when {
+                    showMemory -> MemoryScreen(onBack = { showMemory = false })
+                    showSources -> SourcesScreen(onBack = { showSources = false })
+                    else -> EngineScreen(
                         engine = engine,
                         registry = registry,
                         providerRegistry = providerRegistry,
@@ -63,6 +68,7 @@ class MainActivity : ComponentActivity() {
                         discovery = discovery,
                         initialPrompt = initialPrompt,
                         onOpenMemory = { showMemory = true },
+                        onOpenSources = { showSources = true },
                     )
                 }
             }

@@ -137,6 +137,7 @@ fun EngineScreen(
     discovery: ModelDiscoveryService,
     initialPrompt: String?,
     onOpenMemory: () -> Unit = {},
+    onOpenSources: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -424,6 +425,21 @@ fun EngineScreen(
             ) {
                 Text(
                     "MEMORY",
+                    color = OpTextSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                )
+            }
+            Spacer(Modifier.width(6.dp))
+            Surface(
+                onClick = onOpenSources,
+                shape = RoundedCornerShape(8.dp),
+                color = OpCard,
+                border = BorderStroke(1.dp, OpBorder),
+            ) {
+                Text(
+                    "SOURCES",
                     color = OpTextSecondary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,

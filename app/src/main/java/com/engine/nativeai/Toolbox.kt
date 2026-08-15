@@ -14,6 +14,10 @@ class Toolbox(
     executionManager: ExecutionManager,
 ) {
     val memory: MemoryDatabase = MemoryDatabase(context)
+    val sources: SourceRegistry = SourceRegistry(memory).apply {
+        seed(SourceSeedLoader(context).load()) // uBO-style default catalog, first-run only
+    }
+    val sourceUpdater: SourceUpdater = SourceUpdater(sources, memory)
     val tools: ToolRegistry = ToolRegistry().apply {
         register(MemorySearchTool(memory))
         register(CalculatorTool())
@@ -21,6 +25,7 @@ class Toolbox(
         register(WebSearchTool(LocalFallbackProvider()))
         register(FileSearchTool(context.filesDir))
         register(ModelInfoTool(registry))
+        register(SourceSearchTool(SourceSearch(memory)))
         register(FinalAnswerTool())
         register(
             TerminalTool(
