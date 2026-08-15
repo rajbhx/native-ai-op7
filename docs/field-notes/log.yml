@@ -134,3 +134,23 @@ sections:
         cause: "proot rootfs is a separate filesystem; device shell sees the real /storage/emulated/0/1DMP (1DM download folder); host-bridge shizuku has no root"
         solution: "python3 -m http.server 8000 --bind 0.0.0.0 inside a persistent exec session + device 'curl -o /data/local/tmp/x.apk http://192.168.1.3:8000/x.apk' + 'pm install -t /data/local/tmp/x.apk'; model restore via run-as cat from /sdcard/Download (verified READ_OK)"
         tags: [install, transfer, proot, shizuku, apk, oneplus]
+      - id: A27
+        problem: "Track A compile: 'Unresolved reference: EngineServiceState' + 'Comparison of incompatible enums'"
+        cause: "enum declared INSIDE the companion object is not promoted to the outer class name (only members are); Class.EngineServiceState fails to resolve"
+        solution: "declare EngineServiceState at top level of the service file; reference EngineServiceState.STOPPED directly"
+        tags: [kotlin, enum, companion, compile]
+      - id: A28
+        problem: "Track E compile: 'Unresolved reference: context' in ExecutionManager.backend()"
+        cause: "a constructor parameter without val/var is only visible in property initializers/init, not in method bodies"
+        solution: "class ExecutionManager(private val context: Context)"
+        tags: [kotlin, constructor, compile]
+      - id: A29
+        problem: "JVM tests: ExecutionLayerTestKt > initializationError InvalidTestClassError"
+        cause: "appended JUnit test landed OUTSIDE the class (after the closing brace) -> top-level @Test in the file facade ExecutionLayerTestKt, which JUnit rejects"
+        solution: "keep every @Test inside the class body; verify with tail -n before pushing (104 tests now green)"
+        tags: [junit, kotlin, test, compile]
+      - id: A30
+        problem: "Termux execution absent at the core execution layer; user wants it core-level, optional Anyclaw/Codex/OpenCode later"
+        cause: "audit had parked TermuxBackend; only LocalProcessBackend existed"
+        solution: "TermuxBackend (clean-room): com.termux detection + RunCommandService intent (com.termux.RUN_COMMAND) + file exchange /sdcard/Download/nativeai/<runId>/; TermuxStatus machine with honest reasons; ExecutionManager (Termux READY ? termux : local); Tools settings row; terminalEnabled/terminalAllowlist prefs; READ_EXTERNAL_STORAGE maxSdk 32 + MediaStore fallback for API 33+. One-time user setup: termux-setup-storage + Allow external apps"
+        tags: [termux, execution, intent, tool, backend, memory]
