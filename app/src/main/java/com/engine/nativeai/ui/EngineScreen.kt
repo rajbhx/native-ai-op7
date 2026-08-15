@@ -1299,6 +1299,7 @@ private fun ApiKeyDialog(
     onDismiss: () -> Unit,
 ) {
     var value by remember { mutableStateOf(initial) }
+    val context = LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("API key · $provider", color = OpText) },
@@ -1319,7 +1320,7 @@ private fun ApiKeyDialog(
                     modifier = Modifier
                         .clickable {
                             try {
-                                LocalContext.current.startActivity(
+                                context.startActivity(
                                     Intent(Intent.ACTION_VIEW, Uri.parse("https://opencode.ai/auth")),
                                 )
                             } catch (_: Exception) {
