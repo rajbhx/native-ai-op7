@@ -66,8 +66,9 @@ fun MemoryScreen(onBack: () -> Unit) {
 
     LaunchedEffect(query, selectedSession, refresh) {
         withContext(Dispatchers.IO) {
-            if (selectedSession != null) {
-                messages = memory.recentMessages(selectedSession.id, 100)
+            val session = selectedSession
+            if (session != null) {
+                messages = memory.recentMessages(session.id, 100)
             } else if (query.isBlank()) {
                 sessions = memory.recentSessions(15)
             } else {
