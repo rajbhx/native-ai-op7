@@ -17,7 +17,7 @@ class ChatHistoryTest {
                     SessionInfo(1, now - 120_000, now - 60_000, "first run"),
                 )
             },
-            recentMessages = { sessionId, limit ->
+            recentMessages = { sessionId, _ ->
                 if (sessionId == 1L) {
                     listOf(
                         Message(2, 1, "agent", "answer one", now - 61_000),
@@ -32,7 +32,7 @@ class ChatHistoryTest {
             },
         )
         val sessions = history.recent()
-        assertEquals(listOf(1L, 2L), sessions.map { it.id })
+        assertEquals(listOf(2L, 1L), sessions.map { it.id }) // store returns newest-first
         assertEquals(listOf("user", "agent"), sessions[0].messages.map { it.role })
         assertEquals("prompt one", sessions[0].messages[0].content)
     }
