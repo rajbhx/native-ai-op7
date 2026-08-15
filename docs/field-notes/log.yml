@@ -229,3 +229,29 @@ sections:
         cause: "build.yml concurrency group build-<ref> with cancel-in-progress: true cancels the previous run on every push"
         solution: "push code first, wait for its run to finish (or at least pass the build job) before pushing docs; only the latest HEAD build matters"
         tags: [ci, github-actions, concurrency, cancel]
+
+      - id: A46
+        problem: "CI unit-test compile failed: document tests appended outside SourceUpdaterTest class + marker mismatch (doc-1-12 vs 13-byte PDF)"
+        cause: "hand-edited test file placed new tests after the class closing brace; unchanged-doc marker did not match the real byte size"
+        solution: "move appended tests back inside the class; use the real marker (doc-1-13); rely on CI test compilation even when a local build is impossible"
+        tags: [testing, kotlin, ci, structure]
+      - id: A47
+        problem: "SourceSeedLoader.parse('') threw JSONException in blankInputIsEmpty"
+        cause: "only load() guarded exceptions; org.json JSONObject(String) throws on blank input"
+        solution: "parse() now catches and returns an empty list - malformed catalogs are honest state, never a crash"
+        tags: [org.json, parsing, robustness]
+      - id: A48
+        problem: "one CI build per main push made validation serial; every push cancels the previous run"
+        cause: "concurrency group build-<ref> with cancel-in-progress; on.push only builds main"
+        solution: "feature work on ci/* branches + gh workflow run build.yml --ref ci/<branch> = parallel builds (per-ref concurrency); merge the validated branch into main"
+        tags: [ci, parallel, branches, workflow-dispatch]
+      - id: A49
+        problem: "local inference had no runtime abstraction (GGUF/llama-only paths)"
+        cause: "single phase-1 engine; MNN stayed a parked reference"
+        solution: "RuntimeKind on ModelDescriptor, InferenceBackend seam, MnnBackend dlopen probe over CI-bundled libMNN.so 3.6.1; MNN model inference gated on an on-device benchmark"
+        tags: [mnn, runtime, jni, abstraction]
+      - id: A50
+        problem: "vector index had no owner; embeddings need a validated model"
+        cause: "roadmap listed vectors but no runtime or gate existed"
+        solution: "vendored USearch v2.11.3 headers + vector-lib + USearchVectorIndex (bounded/persisted) + EmbeddingProvider seam; hybrid BM25+HNSW RRF dormant until the benchmark gate passes"
+        tags: [usearch, vector, hybrid, gating]
