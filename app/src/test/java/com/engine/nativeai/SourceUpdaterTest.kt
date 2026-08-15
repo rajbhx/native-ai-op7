@@ -151,7 +151,6 @@ class SourceUpdaterTest {
         assertEquals(SourceStatus.ERROR, store.sourceById(1)!!.status)
         assertNull(store.sourceById(1)!!.revision)
     }
-}
 
     @Test
     fun documentSourceIndexesExtractedText() = runBlocking {
@@ -207,11 +206,11 @@ class SourceUpdaterTest {
                 contentUrl = "https://example.com/doc.pdf",
                 writeTime = now - 48 * hour, updateAfterHours = 24),
         )
-        store.upsertSourceFile(SourceFile(0, 1, "root", blobSha = "doc-1-12", chunked = true, sizeBytes = 12))
+        store.upsertSourceFile(SourceFile(0, 1, "root", blobSha = "doc-1-13", chunked = true, sizeBytes = 13))
         store.replaceSourceChunks(1, 1, listOf("old"))
         val fetcher = FakeFetcher()
         fetcher.responses["https://example.com/doc.pdf"] =
-            FetchResponse(200, "%PDF-1.7 fake".toByteArray()) // 12 bytes
+            FetchResponse(200, "%PDF-1.7 fake".toByteArray()) // 13 bytes
         var extractCalls = 0
         val extractor = object : DocumentTextExtractor {
             override val available = true
@@ -227,3 +226,4 @@ class SourceUpdaterTest {
         assertEquals(0, extractCalls)
         assertTrue(store.chunks.values.flatten().all { it.content == "old" })
     }
+}
