@@ -5,6 +5,13 @@ package com.engine.nativeai
 /** Local on-device model vs remote (network) model. */
 enum class ModelKind { LOCAL, REMOTE }
 
+/**
+ * Inference runtime for a local model. Never assume GGUF-only: a future
+ * model may run on MNN or another backend. Remote models are API-based by
+ * definition; UNKNOWN means the runtime has not been confirmed.
+ */
+enum class RuntimeKind { LLAMA_GGUF, MNN, API, UNKNOWN }
+
 /** Cost tier declared by a provider; PAID requires explicit user permission. */
 enum class ModelCostTier { FREE, PAID, UNKNOWN }
 

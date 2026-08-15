@@ -29,16 +29,19 @@ candidates, dependencies introduced.
 - **Rewrite natively**: we wrote our own thin bridge — equivalent result with
   fewer moving parts.
 
-## MNN (Alibaba)
+## MNN (Alibaba) — ADOPTED (S6, probe only)
 - **Problem**: lightweight cross-platform NN inference (mobile-first).
 - **Learn**: mobile-first quantization + operator kernels; ARM NEON tuning.
-- **Do NOT copy**: its model format/converters; our runtime is GGUF-based.
-- **Android**: yes. **OP7 weight**: fine, but it does not serve GGUF/llama
-  stacks as directly as llama.cpp.
-- **Rewrite natively**: n/a — not adopted. No dependency introduced.
+- **Adopted**: `libMNN.so` 3.6.1 (arm64-v8a) is bundled by CI and probed via a
+  dlopen JNI shim (`MnnBackend`) so the runtime reports honest availability.
+  No MNN model file or inference path ships until an on-device benchmark gate
+  validates a real model (RSS/tok-ms) — the spec forbids fake acceleration.
+- **Runtime**: `RuntimeKind.MNN` on `ModelDescriptor`; picker/card show the
+  runtime badge. GGUF-only paths are removed from the local-model line.
 
 ## Verdict (ADR-001/ADR-002)
-Adopt llama.cpp pinned; minimal custom JNI; no other inference engine.
+Adopt llama.cpp pinned; minimal custom JNI; MNN bundled as a probed runtime,
+not a second inference path yet.
 
 ## PocketPal AI (llama.rn usage patterns)
 - **Learn**: gguf download flow guards (verify magic before rename; free-space
