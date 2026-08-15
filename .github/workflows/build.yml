@@ -54,6 +54,9 @@ jobs:
       - name: JVM unit tests (classifier, parser, router, expr)
         run: ./gradlew :app:testDebugUnitTest --no-daemon
 
+      - name: Lint (lintDebug)
+        run: ./gradlew :app:lintDebug --no-daemon
+
       - name: Validate APK badging (testOnly + ABI gate)
         run: |
           APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
@@ -87,3 +90,20 @@ jobs:
           path: |
             app/build/outputs/apk/debug/*.apk
             SHA256SUMS.txt
+
+  bench-tooling:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Syntax-check benchmark scripts
+        run: bash -n benchmarks/*.sh
+
+      - name: Lint benchmark scripts
+        run: shellcheck -P benchmarks -x benchmarks/*.sh
+
+      - name: Regression harness self-test (fixtures, no device)
+        run: bash benchmarks/compare.sh --self-test

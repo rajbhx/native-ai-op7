@@ -37,10 +37,15 @@ class ModelBenchmark(
         registry.list().filter { registry.provider(it.id) != null }
             .flatMap { run(it.id) }
 
-    suspend fun run(providerId: String): List<BenchmarkResult> {
+    suspend fun run(
+        providerId: String,
+        maxTokens: Int = 32,
+        categories: Set<String> = emptySet(),
+    ): List<BenchmarkResult> {
         val provider = registry.provider(providerId) ?: return emptyList()
-        return prompts.map { (category, prompt) ->
-            val request = ModelRequest(prompt = prompt, maxTokens = 32)
+        val selected = if (categories.isEmpty()) prompts else prompts.filterKeys { it in categories }
+        return selected.map { (category, prompt) ->
+            val request = ModelRequest(prompt = prompt, maxTokens = maxTokens)
             if (provider.descriptor.kind == ModelKind.LOCAL) {
                 runLocal(provider, category, request)
             } else {
