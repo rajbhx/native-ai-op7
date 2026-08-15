@@ -119,3 +119,18 @@ sections:
         cause: "LiteRT-LM (Google AI Edge, ex-TFLite) advertises GPU/NPU LLM acceleration, tool use, on-device LoRA; local 1B Q4 is ~1.8 tok/s (contended)"
         solution: "audited upstream (v0.16.0); parked as reference only (ADR-007 + docs/source-research/litert-lm.md) because runtime is .tflite/.litertlm with no GGUF path — replacing llama.cpp needs a new export pipeline + second runtime and risks the 1.5 GB gate. Revisit on triggers: memory embedder via TFLite, same-device benchmark win, Phase 9 LoRA"
         tags: [litert, tflite, inference, adr, reference]
+      - id: A24
+        problem: "remote quick-send/Agent showed ERROR 'generate failed: Flow exception transparency is violated' and produced zero tokens"
+        cause: "OpenAICompatibleProvider emitted ModelStreamEvent.Error from a bare catch block AND emitted inside withContext(Dispatchers.IO) within the flow builder; kotlinx.coroutines 1.8 bans emit in a context different from the collection context (FlowExceptionTransparencyViolatedException), killing the whole stream"
+        solution: "stream() = flow { HTTP/SSE work }.flowOn(Dispatchers.IO) + .catch { emit(Error) } - never emit inside withContext/catch inside a builder; regression tests (unreachable endpoint -> Error event; local ServerSocket SSE stub -> tokens then Done); reproduced locally with kotlinc + kotlinx-coroutines-core-jvm + org.json jars before burning CI cycles"
+        tags: [kotlinx-coroutines, flow, sse, provider, crash, kotlin]
+      - id: A25
+        problem: "pm install -r -d -t failed INSTALL_FAILED_UPDATE_INCOMPATIBLE on every CI APK; certs drifted run-to-run (0b045c7c/64ced54c/7f721a2c) vs persistent 21add73b"
+        cause: "AGP silently regenerated a random debug keystore each run despite the restored ~/.android/debug.keystore (JDK17 default keystore type is PKCS12 so a JKS fails to load; explicit signingConfig also failed to load it) - only the installed app's original key allows in-place update"
+        solution: "pragmatic, per user decision: accept the new signature - pm uninstall + pm install -t + restore model from /sdcard/Download/nativeai-model-backup.gguf via 'run-as com.engine.nativeai sh -c cat > files/models/model.gguf' (app uid CAN read /sdcard/Download); keep DEBUG_KEYSTORE_BASE64 restore + keytool validation in the workflow but do not gate builds on it"
+        tags: [signing, keystore, install, apk, ci, data-wipe]
+      - id: A26
+        problem: "cannot push files (APK) to the device from the proot shell: proot /storage/emulated/0/1DMP is an ext4 image not visible to the device shell; proot /tmp differs; adb unusable (127.0.0.1:5555 timeout); SELinux blocks pm from reading /sdcard"
+        cause: "proot rootfs is a separate filesystem; device shell sees the real /storage/emulated/0/1DMP (1DM download folder); host-bridge shizuku has no root"
+        solution: "python3 -m http.server 8000 --bind 0.0.0.0 inside a persistent exec session + device 'curl -o /data/local/tmp/x.apk http://192.168.1.3:8000/x.apk' + 'pm install -t /data/local/tmp/x.apk'; model restore via run-as cat from /sdcard/Download (verified READ_OK)"
+        tags: [install, transfer, proot, shizuku, apk, oneplus]
