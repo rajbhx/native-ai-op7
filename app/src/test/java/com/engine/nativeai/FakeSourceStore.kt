@@ -62,7 +62,7 @@ class FakeSourceStore : SourceStore {
     override fun replaceSourceChunks(sourceId: Long, fileId: Long, chunks: List<String>) {
         this.chunks[fileId] = chunks.mapIndexed { i, c ->
             SourceChunk(nextChunkId++, sourceId, fileId, i, c)
-        }
+        }.toMutableList()
     }
 
     override fun touchSourceRead(sourceId: Long) {
