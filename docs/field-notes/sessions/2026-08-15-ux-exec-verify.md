@@ -140,3 +140,19 @@
   force-stop, reopen -> messages rows must survive in `databases/memory.db`.
   section: A
   tags: [memory, conversations, schema, persistence, m1]
+
+## Revision 8c8a4c1 — M1b Memory screen (CI green)
+- **P memory was invisible in the UI; sessions existed but could not be
+  browsed or searched.**
+  cause: no read surface for messages/experiences/facts; the main screen is
+  single-turn.
+  solution: `MemoryScreen` (search field + grouped CONVERSATIONS/EXPERIENCES/
+  FACTS results + recent-sessions browse + per-session message history,
+  restored from disk) reached via a compact MEMORY pill in the header;
+  MainActivity toggles screens with BackHandler, no new UI dependencies.
+  First CI attempt failed (missing material3 Surface import + smart cast on
+  delegated state) - fixed in 8c8a4c1; run 31866771457 GREEN.
+  On-device verify PENDING (device in use): open MEMORY -> browse session
+  from the earlier Test 1 run -> force-stop -> reopen -> history survives.
+  section: A
+  tags: [memory, ui, screen, m1, compose]
