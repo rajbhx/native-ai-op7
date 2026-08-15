@@ -48,22 +48,6 @@ jobs:
             echo "DEBUG_KEYSTORE_BASE64 not set - AGP generates a fresh keystore (installs will wipe app data)"
           fi
 
-      - name: Generate one-time fresh debug keystore artifact (remove after secret set)
-        run: |
-          mkdir -p ~/.android
-          keytool -genkeypair -v -keystore /tmp/fresh-debug.keystore -storepass android \
-            -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 \
-            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          keytool -list -keystore /tmp/fresh-debug.keystore -storepass android -alias androiddebugkey >/dev/null \
-            || { echo "::error::fresh keystore failed keytool validation"; exit 1; }
-          base64 -w 0 /tmp/fresh-debug.keystore > fresh-debug-keystore-base64.txt
-          echo "generated fresh keystore (size $(wc -c < fresh-debug-keystore-base64.txt))"
-      - uses: actions/upload-artifact@v4
-        if: hashFiles('fresh-debug-keystore-base64.txt') != ''
-        with:
-          name: fresh-debug-keystore-base64
-          path: fresh-debug-keystore-base64.txt
-
       - name: Build debug APK (arm64-v8a only)
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
