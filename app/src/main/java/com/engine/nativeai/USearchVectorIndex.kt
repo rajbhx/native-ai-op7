@@ -38,7 +38,7 @@ class USearchVectorIndex(
 
     override fun search(vector: FloatArray, k: Int): List<VectorHit> {
         if (!available || vector.size != dimensions || k <= 0) return emptyList()
-        return nativeSearch(handle, vector, k.coerceAtMost(64)) ?: emptyList()
+        return nativeSearch(handle, vector, k.coerceAtMost(64))?.toList() ?: emptyList()
     }
 
     override fun save() {

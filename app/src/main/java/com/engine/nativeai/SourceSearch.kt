@@ -20,11 +20,13 @@ class SourceSearch(
         withContext(Dispatchers.IO) {
             if (query.isBlank()) return@withContext emptyList()
             val bm25 = db.searchSources(query.trim(), limit)
-            val hybridReady = vectorIndex?.available == true && embeddingProvider?.available == true
-            if (!hybridReady) return@withContext bm25
-            val embedded = runCatching { embeddingProvider.embed(query.trim()) }.getOrNull()
+            val vectorsReady = vectorIndex?.available == true && embeddingProvider?.available == true
+            if (!vectorsReady) return@withContext bm25
+            val index = vectorIndex ?: return@withContext bm25
+            val embedder = embeddingProvider ?: return@withContext bm25
+            val embedded = runCatching { embedder.embed(query.trim()) }.getOrNull()
                 ?: return@withContext bm25
-            val vectorHits = vectorIndex.search(embedded, limit)
+            val vectorHits = index.search(embedded, limit)
             if (vectorHits.isEmpty()) return@withContext bm25
             merge(bm25, vectorHits, limit)
         }
