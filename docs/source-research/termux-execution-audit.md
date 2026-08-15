@@ -43,11 +43,28 @@ intent, so nothing is copied; interfaces are drawn in spirit only.
 - `AgentTool.available` + `ToolRegistry.descriptions()` filter so the model
   is never advertised capabilities that are off.
 
+## Track E — Termux backend at core (implemented)
+
+- `TermuxBackend` (clean-room, `ExecutionBackend`): detects `com.termux`
+  (PackageManager + `<queries>`), probes readiness (`echo termux-ok` via the
+  public `com.termux.RUN_COMMAND` RunCommandService intent), and executes one
+  bounded command per call. Output is captured by file exchange under
+  `/sdcard/Download/nativeai/<runId>/` (out/err/code), with hard timeout,
+  cancellation, best-effort `pkill` via an argv run tag, and cleanup.
+- `TermuxStatus`: NOT_INSTALLED / INSTALLED / SETUP_REQUIRED / READY / ERROR
+  with human reasons — the UI never claims Termux capability it cannot show.
+- `ExecutionManager`: picks Termux when READY, else `LocalProcessBackend`
+  (AI engine works with neither Termux installed nor a local model).
+- One-time user setup surfaced in the Tools settings row: install Termux,
+  run `termux-setup-storage` once, enable “Allow external apps”.
+- Storage: `READ_EXTERNAL_STORAGE` (maxSdk 32) + MediaStore fallback path for
+  future API 33+ devices; no bundled runtime, no GPL code, no new deps.
+
 ## Not done (by design, next phases)
 
-- Backends: `TermuxBackend`, `FutureContainerBackend`, `RemoteExecutionBackend`.
 - Persistent terminal sessions, TTY, streaming, renderable terminal UI.
-- Tools panel + enable/allowlist UI; system-prompt editing; chat history.
+- `FutureContainerBackend`, `RemoteExecutionBackend`.
+- Tools panel polish; system-prompt editing; chat history.
 - `InferenceBackend` abstraction (Vulkan/NNAPI) — measured Phase 7 work.
 
 ## Memory / resource note

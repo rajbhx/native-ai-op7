@@ -34,9 +34,16 @@ One measured optimization per revision; never fabricate capabilities.
 - Execution layer (Termux-inspired, clean-room): `ExecutionBackend`,
   `LocalProcessBackend`, `ExecutionPolicy` (allow-list, deny by default),
   `TerminalTool` — audit: docs/source-research/termux-execution-audit.md.
-- ⬜ Tools panel + terminal enable/allowlist UI.
+- Track E (implemented): `TermuxBackend` at the core execution layer
+  (RunCommandService intent + file exchange), `TermuxStatus` with honest
+  reasons, `ExecutionManager` (Termux when READY, else local), Tools
+  settings row (terminal ON/OFF, allowlist editor, Test connection).
+- Dynamic 1.5 GB memory: `MemoryPlanner` sizes context against live
+  available RAM (15% margin, hard 1536 MB cap) before model load; rejects
+  with an actionable message instead of crashing.
 - ⬜ System-prompt/persona editing; ⬜ chat/message history; ⬜ live
-  stop/abort UX confirmation on-device.
+  stop/abort UX confirmation on-device (Stop button + [STOPPED] trace done;
+  end-to-end verify pending).
 
 ## Phase 4 — Verified learning dataset pipeline ⬜
 - ⬜ Success-filtered synthetic JSONL dataset generation (100+ pairs gate).

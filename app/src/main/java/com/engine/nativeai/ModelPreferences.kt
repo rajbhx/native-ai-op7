@@ -13,6 +13,8 @@ interface ModelPreferencesStore {
     var routingMode: RoutingMode
     var privacyMode: PrivacyMode
     var zenBaseUrl: String
+    var terminalEnabled: Boolean
+    var terminalAllowlist: Set<String>
     fun favorites(): Set<String>
     fun isFavorite(id: String): Boolean
     fun toggleFavorite(id: String): Set<String>
@@ -24,6 +26,8 @@ class InMemoryModelPreferences : ModelPreferencesStore {
     override var routingMode: RoutingMode = RoutingMode.HYBRID
     override var privacyMode: PrivacyMode = PrivacyMode.HYBRID
     override var zenBaseUrl: String = ModelCatalog.ZEN_BASE_URL
+    override var terminalEnabled: Boolean = false
+    override var terminalAllowlist: Set<String> = emptySet()
     private val favs = mutableSetOf<String>()
     override fun favorites(): Set<String> = favs.toSet()
     override fun isFavorite(id: String): Boolean = id in favs
@@ -64,6 +68,18 @@ class ModelPreferences(context: Context) : ModelPreferencesStore {
             ?: ModelCatalog.ZEN_BASE_URL
         set(value) {
             prefs.edit().putString("zen_base_url", value).apply()
+        }
+
+    override var terminalEnabled: Boolean
+        get() = prefs.getBoolean("terminal_enabled", false)
+        set(value) {
+            prefs.edit().putBoolean("terminal_enabled", value).apply()
+        }
+
+    override var terminalAllowlist: Set<String>
+        get() = prefs.getStringSet("terminal_allowlist", emptySet()) ?: emptySet()
+        set(value) {
+            prefs.edit().putStringSet("terminal_allowlist", value).apply()
         }
 
     override fun favorites(): Set<String> =

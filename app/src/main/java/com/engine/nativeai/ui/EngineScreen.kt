@@ -81,11 +81,12 @@ import com.engine.nativeai.EngineConfig
 import com.engine.nativeai.FileSearchTool
 import com.engine.nativeai.FinalAnswerTool
 import com.engine.nativeai.GenerationConfig
+import com.engine.nativeai.ExecutionManager
 import com.engine.nativeai.ExecutionPolicy
 import com.engine.nativeai.LocalFallbackProvider
 import com.engine.nativeai.LocalModelProvider
-import com.engine.nativeai.LocalProcessBackend
 import com.engine.nativeai.MemoryDatabase
+import com.engine.nativeai.MemoryPlanner
 import com.engine.nativeai.ModelDownloader
 import com.engine.nativeai.DownloadResult
 import com.engine.nativeai.MemorySearchTool
@@ -110,6 +111,7 @@ import com.engine.nativeai.RoutingMode
 import com.engine.nativeai.SystemInfoTool
 import com.engine.nativeai.TaskType
 import com.engine.nativeai.TerminalTool
+import com.engine.nativeai.TermuxStatus
 import com.engine.nativeai.ThinkingAgent
 import com.engine.nativeai.ToolRegistry
 import com.engine.nativeai.WebSearchTool
@@ -171,6 +173,14 @@ fun EngineScreen(
     var downloadStatus by remember { mutableStateOf("") }
     var healthStatus by remember { mutableStateOf("") }
     var healthRunning by remember { mutableStateOf(false) }
+    val executionManager = remember { ExecutionManager(context) }
+    var termuxStatus by remember { mutableStateOf(executionManager.status()) }
+    var termuxReason by remember { mutableStateOf(executionManager.statusReason()) }
+    var terminalEnabled by remember { mutableStateOf(prefs.terminalEnabled) }
+    var allowlistText by remember {
+        mutableStateOf(prefs.terminalAllowlist.joinToString(", "))
+    }
+    var probingTermux by remember { mutableStateOf(false) }
     val downloadCancel = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
 
     LaunchedEffect(Unit) {
@@ -223,6 +233,15 @@ fun EngineScreen(
         if (!modelFile.exists()) {
             engineState = EngineUiState.ERROR
             status = "Model not found:\n${modelFile.absolutePath}\nCopy a GGUF there, then retry."
+            return false
+        }
+        // Dynamic 1.5 GB budget: pre-flight before loading (never crash).
+        val plan = MemoryPlanner.plan(modelFile.length(), contextSize, availableRamBytes(context))
+        if (!plan.withinBudget) {
+            engineState = EngineUiState.ERROR
+            status = "MODEL MAY EXCEED AVAILABLE MEMORY \u2014 estimated " +
+                "${plan.totalMb.toInt()} MB vs cap ${plan.availableCapMb.toInt()} MB; " +
+                "drop context to ${plan.maxSafeNctx} or use a smaller GGUF"
             return false
         }
         engineState = EngineUiState.LOADING
@@ -487,6 +506,7 @@ fun EngineScreen(
                         registry = registry,
                         providerRegistry = providerRegistry,
                         prefs = prefs,
+                        executionManager = executionManager,
                         prompt = prompt,
                         mode = routingModes[selectedMode],
                         modeLabel = modes[selectedMode],
@@ -673,6 +693,106 @@ fun EngineScreen(
                 }
                 Spacer(Modifier.height(12.dp))
 
+                Text("TOOLS", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Terminal",
+                        color = OpText,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        when (termuxStatus) {
+                            TermuxStatus.READY -> "\u25cf READY"
+                            TermuxStatus.SETUP_REQUIRED -> "\u25cf SETUP REQUIRED"
+                            TermuxStatus.NOT_INSTALLED -> "\u25cf NOT INSTALLED"
+                            TermuxStatus.INSTALLED -> "\u25cf INSTALLED"
+                            TermuxStatus.ERROR -> "\u25cf ERROR"
+                        },
+                        color = when (termuxStatus) {
+                            TermuxStatus.READY -> OpSuccess
+                            TermuxStatus.SETUP_REQUIRED -> OpAmber
+                            TermuxStatus.ERROR -> OpRed
+                            else -> OpTextSecondary
+                        },
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                if (termuxReason.isNotBlank()) {
+                    Text(
+                        termuxReason,
+                        color = OpTextSecondary,
+                        fontSize = 10.sp,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    PillButton(
+                        if (terminalEnabled) "Terminal ON" else "Terminal OFF",
+                        Modifier.weight(1f),
+                    ) {
+                        val next = !terminalEnabled
+                        if (next && Build.VERSION.SDK_INT <= 32 &&
+                            ContextCompat.checkSelfPermission(
+                                context, Manifest.permission.READ_EXTERNAL_STORAGE,
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            ActivityCompat.requestPermissions(
+                                context as android.app.Activity,
+                                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE),
+                                101,
+                            )
+                        }
+                        terminalEnabled = next
+                        prefs.terminalEnabled = next
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    PillButton(
+                        if (probingTermux) "Probing\u2026" else "Test connection",
+                        Modifier.weight(1f),
+                        enabled = !probingTermux,
+                    ) {
+                        scope.launch {
+                            probingTermux = true
+                            termuxStatus = executionManager.probe()
+                            termuxReason = executionManager.statusReason()
+                            probingTermux = false
+                        }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = allowlistText,
+                    onValueChange = {
+                        allowlistText = it
+                        prefs.terminalAllowlist = it.split(",")
+                            .map { x -> x.trim() }
+                            .filter { y -> y.isNotEmpty() }
+                            .toSet()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = {
+                        Text(
+                            "allowed commands, comma-separated (empty = deny all)",
+                            color = OpTextSecondary,
+                        )
+                    },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = OpRed,
+                        unfocusedBorderColor = OpBorder,
+                        errorBorderColor = OpRed,
+                        cursorColor = OpRed,
+                    ),
+                )
+
+                Spacer(Modifier.height(12.dp))
+
                 Text("HARDWARE TUNING", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(6.dp))
                 Text("CPU THREADS", color = OpTextSecondary, fontSize = 10.sp)
@@ -695,6 +815,12 @@ fun EngineScreen(
                         }
                     }
                 }
+                val dynPlan = MemoryPlanner.plan(modelFile.length(), contextSize, availableRamBytes(context))
+                Text(
+                    "Dynamic budget: est. ${dynPlan.totalMb.toInt()} MB \u00b7 cap ${dynPlan.availableCapMb.toInt()} MB \u00b7 max ctx ${dynPlan.maxSafeNctx}",
+                    color = if (dynPlan.withinBudget) OpTextSecondary else OpAmber,
+                    fontSize = 10.sp,
+                )
                 Spacer(Modifier.height(14.dp))
 
                 Row(Modifier.fillMaxWidth()) {
@@ -922,6 +1048,7 @@ private fun runAgent(
     registry: ModelRegistry,
     providerRegistry: ProviderRegistry,
     prefs: ModelPreferencesStore,
+    executionManager: ExecutionManager,
     prompt: String,
     mode: RoutingMode,
     modeLabel: String,
@@ -962,9 +1089,9 @@ private fun runAgent(
             // enabled in a later phase.
             register(
                 TerminalTool(
-                    backend = LocalProcessBackend(defaultWorkingDirectory = context.filesDir),
-                    policy = ExecutionPolicy(),
-                ),
+                    backend = executionManager.backend(),
+                    policy = ExecutionPolicy(allowList = prefs.terminalAllowlist),
+                ).apply { setEnabled(prefs.terminalEnabled) },
             )
         }
         val agent = ThinkingAgent(
@@ -1123,6 +1250,14 @@ private fun ValuePill(
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
     )
+}
+
+private fun availableRamBytes(context: Context): Long {
+    val am = context.getSystemService(android.app.ActivityManager::class.java)
+        ?: return Long.MAX_VALUE
+    val info = android.app.ActivityManager.MemoryInfo()
+    am.getMemoryInfo(info)
+    return info.availMem
 }
 
 private fun modeIndexFor(mode: RoutingMode): Int = when (mode) {
