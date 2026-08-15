@@ -22,7 +22,9 @@ class SourceSeedLoader(private val context: Context) {
                 val o = arr.getJSONObject(i)
                 val type = runCatching { SourceType.valueOf(o.optString("type")) }.getOrNull()
                     ?: continue
-                val title = o.optString("title").ifBlank { continue }
+                val rawTitle = o.optString("title")
+                if (rawTitle.isBlank()) continue
+                val title = rawTitle
                 out += SourceRegistry.SeedSource(
                     collection = o.optString("collection").ifBlank { "General" },
                     title = title,

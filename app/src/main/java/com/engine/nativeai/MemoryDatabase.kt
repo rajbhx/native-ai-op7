@@ -567,7 +567,7 @@ class MemoryDatabase(context: Context) :
             """UPDATE sources SET revision = ?, etag = ?, last_modified = ?,
                write_time = ?, last_updated = ?, status = ?, file_count = ?,
                size_bytes = ? WHERE id = ?""",
-            arrayOf<Any>(
+            arrayOf<Any?>(
                 revision, etag, lastModified,
                 System.currentTimeMillis(), System.currentTimeMillis(),
                 status.name, fileCount, sizeBytes, sourceId,
@@ -585,7 +585,7 @@ class MemoryDatabase(context: Context) :
 
     /** uBO-style read-time LRU eviction: drop least-recently-read sources. */
     @Synchronized
-    override fun evictSources(keep: Int = SourceCapabilities.EVICT_KEEP): Int {
+    override fun evictSources(keep: Int): Int {
         val db = writableDatabase
         val total = db.rawQuery("SELECT COUNT(*) FROM sources", null).use { c ->
             if (c.moveToFirst()) c.getLong(0) else 0L
@@ -602,7 +602,7 @@ class MemoryDatabase(context: Context) :
         return doomed.size
     }
 
-    override fun searchSources(query: String, limit: Int = 5): List<SourceSearchHit> {
+    override fun searchSources(query: String, limit: Int): List<SourceSearchHit> {
         val terms = query.split(Regex("\\s+")).filter { it.isNotBlank() }
         if (terms.isEmpty()) return emptyList()
         return if (ftsAvailable) ftsSourceSearch(terms, limit) else likeSourceSearch(terms, limit)

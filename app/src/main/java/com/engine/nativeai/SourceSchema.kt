@@ -66,7 +66,7 @@ object SourceSchema {
     )
 
     /** BM25 search over source_chunks_fts; shared with JVM tests (sqlite-jdbc). */
-    const val FTS_SEARCH_SQL: String = """
+    val FTS_SEARCH_SQL: String = """
         SELECT bm25(source_chunks_fts) AS bm25_rank,
                s.title, f.path, c.content
         FROM source_chunks_fts
