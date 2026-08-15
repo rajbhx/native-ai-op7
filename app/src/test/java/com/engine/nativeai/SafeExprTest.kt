@@ -36,6 +36,36 @@ class SafeExprTest {
     }
 
     @Test
+    fun scientificNotation() {
+        assertEquals(1_000_000_000.0, SafeExpr.evaluate("1e9"), 1e-9)
+    }
+
+    @Test
+    fun scientificNotationDecimal() {
+        assertEquals(250_000_000.0, SafeExpr.evaluate("2.5e8"), 1e-9)
+    }
+
+    @Test
+    fun scientificNotationSignedExponent() {
+        assertEquals(0.25, SafeExpr.evaluate("2.5e-1"), 1e-9)
+    }
+
+    @Test
+    fun thousandsSeparators() {
+        assertEquals(1_000_000.0, SafeExpr.evaluate("1,000,000"), 1e-9)
+    }
+
+    @Test
+    fun mixedNumberFormats() {
+        assertEquals(123_456.0, SafeExpr.evaluate("1,234.56e2"), 1e-9)
+    }
+
+    @Test
+    fun malformedExponentFailsGracefully() {
+        assertThrows(NumberFormatException::class.java) { SafeExpr.evaluate("1e") }
+    }
+
+    @Test
     fun divisionByZeroThrows() {
         assertThrows(IllegalArgumentException::class.java) { SafeExpr.evaluate("1 / 0") }
     }

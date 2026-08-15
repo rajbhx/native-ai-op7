@@ -1,6 +1,8 @@
 # ROADMAP — Native Agentic AI Engine (native-ai-op7)
 
 Status: ✅ shipped · 🟡 partial · ⬜ planned.
+North star: memory-first, model-independent, self-learning agent — see
+docs/VISION-MEMORY-FIRST.md for the requirement-by-requirement map.
 Gate for every item: CI green → on-device verified → field note. A feature
 is done only when code compiles, tests pass, and behavior is measured.
 One measured optimization per revision; never fabricate capabilities.

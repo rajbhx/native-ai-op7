@@ -41,7 +41,7 @@ class MemoryDatabase(context: Context) :
     }
 
     companion object {
-        private const val SCHEMA_VERSION = 1
+        private const val SCHEMA_VERSION = 2
         private const val DEFAULT_TOP_K = 3  // spec: Top K = 3 default
         private const val DAY_MS = 86_400_000L
         private const val RECENCY_WINDOW_DAYS = 30.0
@@ -119,8 +119,9 @@ class MemoryDatabase(context: Context) :
             """CREATE TABLE tool_results (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tool_name TEXT NOT NULL,
-                input_hash TEXT NOT NULL,
+                input TEXT NOT NULL DEFAULT '',
                 output_summary TEXT,
+                error_summary TEXT,
                 ok INTEGER NOT NULL DEFAULT 0,
                 timestamp INTEGER NOT NULL
             )""",
@@ -274,13 +275,20 @@ class MemoryDatabase(context: Context) :
         ).use { c -> buildList { while (c.moveToNext()) add(c.toExperience()) } }
 
     @Synchronized
-    fun storeToolResult(toolName: String, inputHash: String, outputSummary: String, ok: Boolean): Long =
+    fun storeToolResult(
+        toolName: String,
+        input: String,
+        outputSummary: String,
+        errorSummary: String?,
+        ok: Boolean,
+    ): Long =
         writableDatabase.insertOrThrow(
             "tool_results", null,
             ContentValues().apply {
                 put("tool_name", toolName)
-                put("input_hash", inputHash)
+                put("input", input)
                 put("output_summary", outputSummary)
+                put("error_summary", errorSummary)
                 put("ok", if (ok) 1 else 0)
                 put("timestamp", System.currentTimeMillis())
             },
@@ -512,9 +520,13 @@ class MemoryDatabase(context: Context) :
     private fun Cursor.toToolResult() = ToolResult(
         id = getLong(getColumnIndexOrThrow("id")),
         toolName = getString(getColumnIndexOrThrow("tool_name")),
-        inputHash = getString(getColumnIndexOrThrow("input_hash")),
+        input = getString(getColumnIndexOrThrow("input")),
         outputSummary = getString(getColumnIndexOrThrow("output_summary")),
+        errorSummary = getStringOrNull(getColumnIndexOrThrow("error_summary")),
         ok = getInt(getColumnIndexOrThrow("ok")) == 1,
         timestamp = getLong(getColumnIndexOrThrow("timestamp")),
     )
+
+    private fun Cursor.getStringOrNull(col: Int): String? =
+        if (isNull(col)) null else getString(col)
 }

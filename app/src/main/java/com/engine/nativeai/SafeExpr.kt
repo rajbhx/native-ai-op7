@@ -29,10 +29,20 @@ object SafeExpr {
             val c = input[i]
             when {
                 c.isWhitespace() -> i++
-                c.isDigit() || c == '.' -> {
+                c.isDigit() || c == '.' || c == ',' -> {
                     val start = i
-                    while (i < input.length && (input[i].isDigit() || input[i] == '.')) i++
-                    val raw = input.substring(start, i)
+                    while (i < input.length) {
+                        val ch = input[i]
+                        when {
+                            ch.isDigit() || ch == '.' || ch == ',' -> i++
+                            ch == 'e' || ch == 'E' -> {
+                                i++
+                                if (i < input.length && (input[i] == '+' || input[i] == '-')) i++
+                            }
+                            else -> break
+                        }
+                    }
+                    val raw = input.substring(start, i).replace(",", "")
                     out.add(Tok(T.NUM, raw.toDouble(), raw))
                 }
                 c == '+' -> { out.add(Tok(T.ADD)); i++ }

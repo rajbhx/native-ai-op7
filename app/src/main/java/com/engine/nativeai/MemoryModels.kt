@@ -24,8 +24,9 @@ data class Fact(
 data class ToolResult(
     val id: Long,
     val toolName: String,
-    val inputHash: String,
+    val input: String,
     val outputSummary: String,
+    val errorSummary: String?,
     val ok: Boolean,
     val timestamp: Long,
 )

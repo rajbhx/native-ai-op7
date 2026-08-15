@@ -55,6 +55,7 @@ class ModelBenchmark(
                         "tokens=${r.tokens} dur=${r.durationMs}ms " +
                             "tps=${r.tokensPerSec?.let { "%.1f".format(it) } ?: "n/a"} " +
                             "first=${r.firstTokenMs ?: r.remoteLatencyMs ?: 0}ms ok=${r.ok}",
+                        null,
                         r.ok,
                     )
                 }
