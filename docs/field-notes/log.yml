@@ -204,3 +204,18 @@ sections:
         cause: "no metrics contract; trace events were plain data; no jank/leak tooling"
         solution: "RuntimeMetrics (load, first-token, tok/s, per-tool, errors/retries, restarts, jank) + DiagnosticsProvider/RuntimeDiagnostics + DiagnosticsDialog; AgentEvent atMs/durationMs with timestamped trace lines (TraceLine strips the prefix); FrameJankMonitor (Choreographer, no dep); LeakCanary debugImplementation only; .maestro/acceptance flows on the physical device (arm64-only APK cannot run on x86_64 CI emulators); docs/source-research/perf-observability-reference.md + license review rows"
         tags: [observability, metrics, diagnostics, jank, leakcanary, maestro]
+      - id: A41
+        problem: "Engine Settings bottom sheet did not scroll on the phone (1080x2400): HARDWARE TUNING, Start service, Download GGUF, Stats and TOOL INVENTORY sat below the fold and were unreachable, so the buttons looked 'missing' and Download/Stats could not be exercised"
+        cause: "ModalBottomSheet body Column had no scroll modifier; the sheet is full-height (skipPartiallyExpanded), so taller-than-screen content was clipped"
+        solution: "added .verticalScroll(rememberScrollState()) to the sheet Column"
+        tags: [ux, bottom-sheet, scroll, settings, buttons]
+      - id: A42
+        problem: "app SIGSEGV'd (native, fault addr 0x0) in ggml_compute_forward_rope (libggml-cpu-android_armv8.2_2.so) ~2 s after 'agent stopped' while running Qwen2.5-0.5B locally, killing the whole process (engine service runs in the same process)"
+        cause: "stopRun() called runJob.cancel() but immediately released running/runJob; local generation is a blocking llama.cpp decode inside callbackFlow, so coroutine cancellation only closes the flow (which fires nativeCancel) and the native loop unwinds on the next sampled token (~0.5-1 s); starting a new run in that window overlapped two generations on one llama_context, corrupting the graph"
+        solution: "stopRun() now calls engine.cancel() first (stops the native loop promptly) and keeps running=true until the job's finally unwinds, so a new run can never overlap a still-decoding engine; both quick-send and agent paths reset running in finally"
+        tags: [crash, sigsegv, rope, stop, concurrency, native, llama]
+      - id: A43
+        problem: "startup status line was a stale constant ('Engine library loaded. Put a GGUF in: …') shown even when models/model.gguf existed"
+        cause: "status was initialized once with a fixed string, never reflecting the actual library scan"
+        solution: "initialize from LocalModelLibrary.scan(): empty -> guidance to Download/import; non-empty -> 'Local library ready: <files>'"
+        tags: [ux, status, local-library, contradiction]

@@ -86,13 +86,15 @@ One measured optimization per revision; never fabricate capabilities.
   without justification.
 
 ## Immediate next (ordered)
-1. Local model library (multi-GGUF, SAF import, select-then-Load) + install
-   in place; on-device acceptance incl. Maestro flows.
-2. On-device: verify remote persistence across restart, intent `--es prompt`
-   hook, remote Send routing; observe DiagnosticsDialog values (real
+1. On-device acceptance of the current build: settings sheet now scrolls
+   (Download/Stats/Start service reachable), startup status reflects the
+   real library, Stop mid-generation + immediate re-run no longer overlaps
+   the native engine (SIGSEGV fix, field note A42).
+2. Verify remote persistence across restart, intent `--es prompt` hook,
+   remote Send routing; observe DiagnosticsDialog values (real
    measurements only).
 3. Run user tests 1–3 (math routing, ReAct memory loop, 2048-ctx sustained
-   generation) and record results + field note A24+.
+   generation) and record results + field note A44+.
 4. Phase 7 sweep (threads/GPU layers) → Vulkan/NNAPI decision.
 5. Tools panel + service-state UI; then learning dataset pipeline.
 
