@@ -74,8 +74,10 @@ import com.engine.nativeai.EngineConfig
 import com.engine.nativeai.FileSearchTool
 import com.engine.nativeai.FinalAnswerTool
 import com.engine.nativeai.GenerationConfig
+import com.engine.nativeai.ExecutionPolicy
 import com.engine.nativeai.LocalFallbackProvider
 import com.engine.nativeai.LocalModelProvider
+import com.engine.nativeai.LocalProcessBackend
 import com.engine.nativeai.MemoryDatabase
 import com.engine.nativeai.ModelDownloader
 import com.engine.nativeai.DownloadResult
@@ -100,6 +102,7 @@ import com.engine.nativeai.NativeEngine
 import com.engine.nativeai.RoutingMode
 import com.engine.nativeai.SystemInfoTool
 import com.engine.nativeai.TaskType
+import com.engine.nativeai.TerminalTool
 import com.engine.nativeai.ThinkingAgent
 import com.engine.nativeai.ToolRegistry
 import com.engine.nativeai.WebSearchTool
@@ -914,6 +917,16 @@ private fun runAgent(
             register(FileSearchTool(context.filesDir))
             register(ModelInfoTool(registry))
             register(FinalAnswerTool())
+            // Execution layer (Termux-inspired abstraction, clean-room).
+            // Disabled by default: the model can never bypass the tool
+            // permission boundary or the command policy until explicitly
+            // enabled in a later phase.
+            register(
+                TerminalTool(
+                    backend = LocalProcessBackend(defaultWorkingDirectory = context.filesDir),
+                    policy = ExecutionPolicy(),
+                ),
+            )
         }
         val agent = ThinkingAgent(
             router = ModelRouter(mode = effectiveMode),

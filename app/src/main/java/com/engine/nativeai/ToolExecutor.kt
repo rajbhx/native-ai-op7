@@ -19,6 +19,10 @@ class ToolExecutor(
     suspend fun execute(name: String, input: String): ToolOutput {
         val tool = registry[name]
             ?: return ToolOutput(name, "", false, "unknown tool: $name")
+        if (!tool.available) {
+            logTool(name, input, "unavailable", false)
+            return ToolOutput(name, "", false, "tool unavailable")
+        }
         if (!permissionManager.canExecute(tool.permission)) {
             logTool(name, input, "denied", false)
             return ToolOutput(name, "", false, permissionManager.denialReason(name, tool.permission))
