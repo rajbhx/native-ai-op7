@@ -154,3 +154,18 @@ sections:
         cause: "audit had parked TermuxBackend; only LocalProcessBackend existed"
         solution: "TermuxBackend (clean-room): com.termux detection + RunCommandService intent (com.termux.RUN_COMMAND) + file exchange /sdcard/Download/nativeai/<runId>/; TermuxStatus machine with honest reasons; ExecutionManager (Termux READY ? termux : local); Tools settings row; terminalEnabled/terminalAllowlist prefs; READ_EXTERNAL_STORAGE maxSdk 32 + MediaStore fallback for API 33+. One-time user setup: termux-setup-storage + Allow external apps"
         tags: [termux, execution, intent, tool, backend, memory]
+      - id: A31
+        problem: "tools invisible/uncontrolled; no inventory contract between ToolRegistry and UI"
+        cause: "ToolRegistry exposed only descriptions(); settings had just the terminal row"
+        solution: "ToolDescriptor + ToolRegistry.snapshot() + shared Toolbox (one construction path for agent and settings); Tools section shows every tool with AVAILABLE/DISABLED/APPROVAL/PRIVILEGED badges"
+        tags: [tools, registry, ui, inventory]
+      - id: A32
+        problem: "agent trace could not prove which execution backend ran a terminal command"
+        cause: "TerminalTool output had no backend marker"
+        solution: "AgentTool.backendLabel (termux/local) + TerminalTool prefixes observations with [termux]/[local]"
+        tags: [trace, termux, observability]
+      - id: A33
+        problem: "no authoritative model status line; quota static until manual health press; no system prompt override; Stats lacked affinity + dynamic budget"
+        cause: "no derived status, no auto health refresh, hardcoded system prompt, affinity pin result only logged"
+        solution: "ModelStatus.line() (READY/AVAILABLE/NO MODEL FILE/ONLINE/OFFLINE) + auto health 60s cache + persisted systemPromptOverride (ThinkingAgent + quick-send) + affinity_applied in native stats JSON + Stats budget/max-ctx lines"
+        tags: [model, state, health, system-prompt, affinity, stats]
