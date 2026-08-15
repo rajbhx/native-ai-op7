@@ -253,11 +253,11 @@ for th in $THREADS; do
                 # 1) force-stop, then verify the pid is really gone.
                 remote am force-stop "$BENCH_PKG"
                 for ((i = 0; i < 10; i++)); do
-                    pid="$(remote pidof "$BENCH_PKG" | tr -d '\r' || true)"
+                    pid="$(remote pidof "$BENCH_PKG" 2>&1 | tr -d '\r' || true)"
                     [ -z "$pid" ] && break
                     sleep 1
                 done
-                pid="$(remote pidof "$BENCH_PKG" | tr -d '\r' || true)"
+                pid="$(remote pidof "$BENCH_PKG" 2>&1 | tr -d '\r' || true)"
                 if [ -n "$pid" ]; then
                     echo "  warn: force-stop did not stop ${BENCH_PKG} (pid=${pid}); continuing"
                 fi
@@ -266,7 +266,7 @@ for th in $THREADS; do
                 remote logcat -c
 
                 # 3) cold launch with the cell config.
-                start_out="$(remote am start -W -n "$BENCH_ACTIVITY" \
+                start_out="$(remote am start -W -n "$BENCH_ACTIVITY" 2>&1 \
                     --es bench 1 --es run_id "$run_id" \
                     --es threads "$th" --es ctx "$ctx_n" --es gpu_layers "$gl" \
                     --es bench_tokens "$TOKENS" --es bench_categories "$CATEGORIES" || true)"
@@ -277,7 +277,7 @@ for th in $THREADS; do
 
                 # 4) best-effort whole-app PSS while the bench is running.
                 pss_kb=""
-                if pss_out="$(remote dumpsys meminfo "$BENCH_PKG" 2>/dev/null)"; then
+                if pss_out="$(remote dumpsys meminfo "$BENCH_PKG" 2>&1)"; then
                     pss_kb="$(printf '%s\n' "$pss_out" | tr -d '\r' |
                         awk '/^TOTAL PSS:/ { print $3; exit } /^TOTAL[[:space:]]+[0-9]/ { print $2; exit }')"
                 fi
@@ -286,7 +286,7 @@ for th in $THREADS; do
                 done_row=""
                 polls=$((CELL_TIMEOUT_S / POLL_INTERVAL_S))
                 for ((i = 0; i < polls; i++)); do
-                    done_row="$(remote logcat -d -s "$BENCH_TAG:I" 2>/dev/null |
+                    done_row="$(remote logcat -d -s "$BENCH_TAG:I" 2>&1 |
                         grep "\"run_id\":\"${run_id}\"" | grep '"kind":"done"' | tail -1 || true)"
                     [ -n "$done_row" ] && break
                     sleep "$POLL_INTERVAL_S"
@@ -303,7 +303,7 @@ for th in $THREADS; do
                 #    retry the dump because the bridge can race and drop it.
                 rows=""
                 for ((i = 0; i < 5; i++)); do
-                    rows="$(remote logcat -d -s "$BENCH_TAG:I" 2>/dev/null |
+                    rows="$(remote logcat -d -s "$BENCH_TAG:I" 2>&1 |
                         grep "\"run_id\":\"${run_id}\"" |
                         sed -E 's/^.*NATIVEAI_BENCH: //' |
                         tr -d '\r' || true)"
