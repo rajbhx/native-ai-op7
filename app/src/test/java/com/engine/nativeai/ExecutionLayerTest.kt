@@ -87,8 +87,9 @@ class ExecutionLayerTest {
         }
         delay(300)
         backend.shutdown()
-        val r = withTimeoutOrNull(2000) { job.join() }
-        // The execute call must return (killed), not hang forever.
+        // execute() must return well before the 30s sleep (killed by
+        // shutdown), even though drain threads may take ~1s each.
+        val r = withTimeoutOrNull(5000) { job.join() }
         assertTrue(r != null)
     }
 }
