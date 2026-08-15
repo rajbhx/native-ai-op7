@@ -13,6 +13,7 @@ data class ModelDescriptor(
     val endpoint: String,
     val modelType: String,
     val kind: ModelKind,
+    val runtime: RuntimeKind = RuntimeKind.UNKNOWN,
     val costTier: ModelCostTier,
     val availability: ModelAvailability,
     val contextLength: Int? = null,
@@ -37,6 +38,7 @@ data class ModelDescriptor(
         put("endpoint", endpoint)
         put("model_type", modelType)
         put("kind", kind.name)
+        put("runtime", runtime.name)
         put("cost_tier", costTier.name)
         put("availability", availability.name)
         put("context_length", contextLength ?: JSONObject.NULL)
@@ -63,6 +65,7 @@ data class ModelDescriptor(
             endpoint = j.optString("endpoint", ""),
             modelType = j.optString("model_type", "chat"),
             kind = runCatching { ModelKind.valueOf(j.getString("kind")) }.getOrDefault(ModelKind.REMOTE),
+            runtime = runCatching { RuntimeKind.valueOf(j.optString("runtime")) }.getOrDefault(RuntimeKind.UNKNOWN),
             costTier = runCatching { ModelCostTier.valueOf(j.getString("cost_tier")) }.getOrDefault(ModelCostTier.UNKNOWN),
             availability = runCatching { ModelAvailability.valueOf(j.getString("availability")) }
                 .getOrDefault(ModelAvailability.UNKNOWN),

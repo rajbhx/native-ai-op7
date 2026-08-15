@@ -111,6 +111,7 @@ import com.engine.nativeai.ModelRegistry
 import com.engine.nativeai.ModelPreferencesStore
 import com.engine.nativeai.ModelRouter
 import com.engine.nativeai.ModelStreamEvent
+import com.engine.nativeai.RuntimeKind
 import com.engine.nativeai.OpenAICompatibleProvider
 import com.engine.nativeai.PrivacyMode
 import com.engine.nativeai.ProviderRegistry
@@ -1676,6 +1677,17 @@ private fun ModelCard(
                 modifier = Modifier.weight(1f),
             )
             ProviderPill(if (d.kind == ModelKind.LOCAL) "LOCAL" else "REMOTE")
+            if (d.runtime != RuntimeKind.UNKNOWN) {
+                ProviderPill(
+                    when (d.runtime) {
+                        RuntimeKind.LLAMA_GGUF -> "GGUF"
+                        RuntimeKind.MNN -> "MNN"
+                        RuntimeKind.API -> "API"
+                        RuntimeKind.UNKNOWN -> ""
+                    },
+                    color = OpTextSecondary,
+                )
+            }
             when (d.costTier) {
                 ModelCostTier.FREE -> ProviderPill("FREE", color = OpAmber)
                 ModelCostTier.PAID -> ProviderPill("PAID", color = OpTextSecondary)
@@ -1702,7 +1714,14 @@ private fun ModelCard(
         if (d.kind == ModelKind.LOCAL && modelFileSizeMb != null) {
             Text(
                 buildString {
-                    append("GGUF \u00b7 ${modelFileSizeMb} MB")
+                    append(
+                        when (d.runtime) {
+                            RuntimeKind.MNN -> "MNN"
+                            RuntimeKind.LLAMA_GGUF -> "GGUF"
+                            else -> "LOCAL"
+                        },
+                    )
+                    append(" \u00b7 ${modelFileSizeMb} MB")
                     if (quantTag != null) append(" \u00b7 $quantTag")
                     append(" on device")
                 },

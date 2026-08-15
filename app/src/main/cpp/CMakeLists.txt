@@ -30,8 +30,18 @@ add_library(native-lib SHARED
     native-lib.cpp
     NativeEngine.cpp
     MemoryMonitor.cpp
-    hardware_detector.cpp)
-target_link_libraries(native-lib PRIVATE llama log)
+    hardware_detector.cpp
+    mnn_probe.cpp)
+target_link_libraries(native-lib PRIVATE llama log dl)
 target_include_directories(native-lib PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp/include
     ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp/ggml/include)
+
+# USearch HNSW vector index (S7): own shared lib so llama/native-lib is
+# untouched; loaded lazily by USearchVectorIndex. Headers are vendored
+# (third_party/usearch, v2.11.3, Apache-2.0).
+add_library(vector-lib SHARED usearch_jni.cpp)
+target_include_directories(vector-lib PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/usearch/include)
+target_link_libraries(vector-lib PRIVATE log dl)
+target_compile_options(vector-lib PRIVATE -Wno-unused-parameter)

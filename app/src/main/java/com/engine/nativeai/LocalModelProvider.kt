@@ -24,6 +24,7 @@ class LocalModelProvider(
         endpoint = "native://llama.cpp",
         modelType = "chat",
         kind = ModelKind.LOCAL,
+        runtime = RuntimeKind.LLAMA_GGUF,
         costTier = ModelCostTier.FREE,
         availability = ModelAvailability.AVAILABLE,
         contextLength = config.contextSize,

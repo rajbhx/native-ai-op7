@@ -42,6 +42,8 @@ class FakeSourceStore : SourceStore {
 
     override fun sourceFiles(sourceId: Long): List<SourceFile> = files[sourceId]?.toList() ?: emptyList()
 
+    override fun chunkById(id: Long): SourceChunk? = chunks.values.flatten().firstOrNull { it.id == id }
+
     override fun upsertSourceFile(f: SourceFile): Long {
         val list = files.getOrPut(f.sourceId) { mutableListOf() }
         val existing = list.firstOrNull { it.path == f.path }
@@ -114,6 +116,7 @@ class FakeSourceStore : SourceStore {
                     filePath = sourceFiles(chunk.sourceId).firstOrNull { it.id == chunk.sourceFileId }?.path ?: "?",
                     content = chunk.content,
                     score = -n.toFloat(),
+                    chunkId = chunk.id,
                 )
             }
         }

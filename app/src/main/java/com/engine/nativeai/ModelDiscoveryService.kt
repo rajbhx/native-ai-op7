@@ -68,6 +68,7 @@ class ModelDiscoveryService(
                             ?: endpoint,
                         modelType = existing?.modelType ?: "chat",
                         kind = ModelKind.REMOTE,
+                        runtime = RuntimeKind.API,
                         costTier = costTierFor(id, existing),
                         availability = ModelAvailability.UNKNOWN,
                         contextLength = existing?.contextLength,
