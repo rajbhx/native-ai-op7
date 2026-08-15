@@ -18,6 +18,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,6 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,11 +60,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
@@ -139,7 +145,8 @@ fun EngineScreen(
     var answer by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
     var traceExpanded by remember { mutableStateOf(true) }
-    var serviceOn by remember { mutableStateOf(false) }
+    val serviceState by EngineForegroundService.state.collectAsState()
+    val serviceRunning = serviceState != EngineForegroundService.EngineServiceState.STOPPED
     var engineState by remember { mutableStateOf(EngineUiState.READY) }
     var selectedMode by remember { mutableStateOf(modeIndexFor(prefs.routingMode)) }
     var selectedModelId by remember {
@@ -241,6 +248,87 @@ fun EngineScreen(
         }
     }
 
+    // Quick completion with the selected model (one tap / IME Send).
+    fun sendQuick() {
+        if (prompt.isBlank() || running) return
+        runJob = scope.launch {
+            try {
+                val effectiveMode = if (prefs.privacyMode == PrivacyMode.LOCAL_ONLY) {
+                    RoutingMode.OFFLINE_ONLY
+                } else {
+                    routingModes[selectedMode]
+                }
+                val descriptor = ModelRouter(effectiveMode).route(
+                    AgentTask(
+                        prompt = prompt,
+                        taskType = TaskType.CHAT,
+                        contextLength = contextSize,
+                        networkAvailable = hasNetwork(context),
+                    ),
+                    registry,
+                    preferredId = selectedModelId,
+                )
+                if (descriptor == null) {
+                    status = "no model available for quick completion"
+                    engineState = EngineUiState.ERROR
+                    return@launch
+                }
+                if (descriptor.kind == ModelKind.LOCAL && !ensureLocalLoaded()) {
+                    return@launch
+                }
+                val provider = registry.providerFor(descriptor)
+                if (provider == null) {
+                    status = "provider not ready: ${descriptor.id}"
+                    engineState = EngineUiState.ERROR
+                    return@launch
+                }
+                running = true
+                output = ""
+                answer = ""
+                engineState = EngineUiState.THINKING
+                status = "generating via ${descriptor.id}\u2026"
+                val sb = StringBuilder()
+                provider.stream(
+                    ModelRequest(prompt = prompt, maxTokens = 64),
+                ).collect { ev ->
+                    when (ev) {
+                        is ModelStreamEvent.Token -> {
+                            sb.append(ev.text)
+                            answer = sb.toString()
+                        }
+                        is ModelStreamEvent.Reasoning -> Unit
+                        is ModelStreamEvent.Done -> Unit
+                        is ModelStreamEvent.Error ->
+                            throw IllegalStateException(ev.message)
+                    }
+                }
+                status = "generation complete (${sb.length} chars)"
+                engineState = EngineUiState.COMPLETED
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                status = "generation stopped"
+                engineState = EngineUiState.READY
+            } catch (e: Exception) {
+                status = "generate failed: ${e.message}"
+                engineState = EngineUiState.ERROR
+            } finally {
+                running = false
+                runJob = null
+            }
+        }
+    }
+
+    // Stop aborts the running agent/generation and records it in the trace.
+    fun stopRun() {
+        runJob?.cancel()
+        runJob = null
+        running = false
+        engineState = EngineUiState.READY
+        status = "agent stopped"
+        if (output.isNotBlank()) {
+            output = output.trimEnd('\n') + "\n[STOPPED]"
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -335,6 +423,8 @@ fun EngineScreen(
                 minLines = 2,
                 maxLines = 6,
                 isError = false,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { sendQuick() }),
                 trailingIcon = {
                     if (prompt.isNotEmpty()) {
                         Text(
@@ -356,83 +446,21 @@ fun EngineScreen(
             )
             Spacer(Modifier.width(8.dp))
             Button(
-                onClick = {
-                    if (prompt.isBlank()) return@Button
-                    runJob = scope.launch {
-                        try {
-                            val effectiveMode = if (prefs.privacyMode == PrivacyMode.LOCAL_ONLY) {
-                                RoutingMode.OFFLINE_ONLY
-                            } else {
-                                routingModes[selectedMode]
-                            }
-                            val descriptor = ModelRouter(effectiveMode).route(
-                                AgentTask(
-                                    prompt = prompt,
-                                    taskType = TaskType.CHAT,
-                                    contextLength = contextSize,
-                                    networkAvailable = hasNetwork(context),
-                                ),
-                                registry,
-                                preferredId = selectedModelId,
-                            )
-                            if (descriptor == null) {
-                                status = "no model available for quick completion"
-                                engineState = EngineUiState.ERROR
-                                return@launch
-                            }
-                            if (descriptor.kind == ModelKind.LOCAL && !ensureLocalLoaded()) {
-                                return@launch
-                            }
-                            val provider = registry.providerFor(descriptor)
-                            if (provider == null) {
-                                status = "provider not ready: ${descriptor.id}"
-                                engineState = EngineUiState.ERROR
-                                return@launch
-                            }
-                            running = true
-                            output = ""
-                            answer = ""
-                            engineState = EngineUiState.THINKING
-                            status = "generating via ${descriptor.id}\u2026"
-                            val sb = StringBuilder()
-                            provider.stream(
-                                ModelRequest(prompt = prompt, maxTokens = 64),
-                            ).collect { ev ->
-                                when (ev) {
-                                    is ModelStreamEvent.Token -> {
-                                        sb.append(ev.text)
-                                        answer = sb.toString()
-                                    }
-                                    is ModelStreamEvent.Reasoning -> Unit
-                                    is ModelStreamEvent.Done -> Unit
-                                    is ModelStreamEvent.Error ->
-                                        throw IllegalStateException(ev.message)
-                                }
-                            }
-                            status = "generation complete (${sb.length} chars)"
-                            engineState = EngineUiState.COMPLETED
-                        } catch (e: kotlinx.coroutines.CancellationException) {
-                            status = "generation stopped"
-                            engineState = EngineUiState.READY
-                        } catch (e: Exception) {
-                            status = "generate failed: ${e.message}"
-                            engineState = EngineUiState.ERROR
-                        } finally {
-                            running = false
-                            runJob = null
-                        }
-                    }
-                },
+                onClick = { sendQuick() },
                 enabled = prompt.isNotBlank() && !running,
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = OpCard,
                     contentColor = OpText,
+                    disabledContainerColor = OpCard.copy(alpha = 0.4f),
+                    disabledContentColor = OpTextSecondary,
                 ),
                 border = BorderStroke(1.dp, OpBorder),
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier
+                    .height(56.dp)
+                    .semantics { contentDescription = "Send prompt" },
             ) {
-                Text("\u2191", fontSize = 20.sp)
+                Text("Send", fontWeight = FontWeight.Bold)
             }
         }
         Text(
@@ -477,7 +505,7 @@ fun EngineScreen(
             Spacer(Modifier.width(8.dp))
             if (running) {
                 PillButton("Stop", Modifier.weight(1f), enabled = true) {
-                    runJob?.cancel()
+                    stopRun()
                 }
             } else {
                 PillButton(
@@ -671,18 +699,16 @@ fun EngineScreen(
 
                 Row(Modifier.fillMaxWidth()) {
                     PillButton(
-                        if (serviceOn) "STOP SERVICE" else "Start service",
+                        if (serviceRunning) "STOP SERVICE" else "Start service",
                         Modifier.weight(1f),
                         enabled = !running,
                     ) {
-                        val next = !serviceOn
                         try {
-                            if (next) {
-                                EngineForegroundService.start(context)
-                            } else {
+                            if (serviceRunning) {
                                 EngineForegroundService.stop(context)
+                            } else {
+                                EngineForegroundService.start(context)
                             }
-                            serviceOn = next
                         } catch (e: Exception) {
                             status = "service failed: ${e.message}"
                         }

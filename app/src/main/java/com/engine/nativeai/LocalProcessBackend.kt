@@ -18,9 +18,16 @@ class LocalProcessBackend(
 
     override val available: Boolean = true
 
+    private val liveProcesses = java.util.concurrent.ConcurrentHashMap.newKeySet<Process>()
+
     companion object {
         fun defaultShell(): String =
             if (File("/system/bin/sh").exists()) "/system/bin/sh" else "sh"
+    }
+
+    override fun shutdown() {
+        liveProcesses.forEach { p -> runCatching { p.destroyForcibly() } }
+        liveProcesses.clear()
     }
 
     override suspend fun execute(request: ExecutionRequest): ExecutionResult =
@@ -37,6 +44,7 @@ class LocalProcessBackend(
                     127, "", e.message ?: "process start failed", 0,
                 )
             }
+            liveProcesses.add(process)
             try {
                 val out = StringBuilder()
                 val err = StringBuilder()
@@ -76,6 +84,7 @@ class LocalProcessBackend(
                 throw e
             } finally {
                 process.destroy()
+                liveProcesses.remove(process)
             }
         }
 }

@@ -1,6 +1,9 @@
 package com.engine.nativeai
 
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -75,3 +78,17 @@ class ExecutionLayerTest {
         assertTrue(ok.output.contains("terminal-ok"))
     }
 }
+
+    @Test
+    fun localBackendShutdownDestroysLiveProcesses() = runBlocking {
+        val backend = LocalProcessBackend()
+        // Start a long-lived process, then shutdown must terminate it.
+        val job = launch {
+            backend.execute(ExecutionRequest(command = "sleep 30", timeoutMs = 30_000))
+        }
+        delay(300)
+        backend.shutdown()
+        val r = withTimeoutOrNull(2000) { job.join() }
+        // The execute call must return (killed), not hang forever.
+        assertTrue(r != null)
+    }

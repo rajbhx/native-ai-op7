@@ -14,6 +14,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -38,6 +41,7 @@ class EngineForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
+        _state.value = EngineServiceState.STARTING
         startForeground(NOTIFICATION_ID, buildNotification("Engine online"))
     }
 
@@ -49,6 +53,7 @@ class EngineForegroundService : Service() {
             watchdog = MemoryWatchdog(engine!!)
             scope.launch { watchdogLoop() }
         }
+        _state.value = EngineServiceState.READY
         return START_STICKY
     }
 
@@ -125,6 +130,7 @@ class EngineForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        _state.value = EngineServiceState.STOPPED
         scope.cancel()
         engine?.close()
         super.onDestroy()
@@ -133,6 +139,14 @@ class EngineForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "native_ai_engine"
         private const val NOTIFICATION_ID = 1001
+
+        /** Single authoritative engine-service state for the UI (Track A R3). */
+        enum class EngineServiceState {
+            STOPPED, STARTING, READY, BUSY, ERROR,
+        }
+
+        private val _state = MutableStateFlow(EngineServiceState.STOPPED)
+        val state: StateFlow<EngineServiceState> = _state.asStateFlow()
 
         fun start(context: Context) {
             val intent = Intent(context, EngineForegroundService::class.java)

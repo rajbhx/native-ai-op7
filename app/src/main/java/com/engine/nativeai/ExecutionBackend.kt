@@ -8,6 +8,9 @@ package com.engine.nativeai
 interface ExecutionBackend {
     val available: Boolean
     suspend fun execute(request: ExecutionRequest): ExecutionResult
+
+    /** Release managed processes/resources. Default no-op for stateless backends. */
+    fun shutdown() {}
 }
 
 /** Bounded process request (Termux ExecutionCommand concept, clean-room). */
