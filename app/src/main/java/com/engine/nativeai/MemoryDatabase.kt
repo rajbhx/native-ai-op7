@@ -494,6 +494,11 @@ class MemoryDatabase(context: Context) :
         writableDatabase.execSQL("DELETE FROM sources WHERE id = ?", arrayOf(id.toString()))
     }
 
+    override fun chunkById(id: Long): SourceChunk? =
+        readableDatabase.rawQuery(
+            "SELECT * FROM source_chunks WHERE id = ?", arrayOf(id.toString()),
+        ).use { c -> if (c.moveToFirst()) c.toSourceChunk() else null }
+
     override fun sourceFiles(sourceId: Long): List<SourceFile> =
         readableDatabase.rawQuery(
             "SELECT * FROM source_files WHERE source_id = ? ORDER BY path ASC",
@@ -625,6 +630,7 @@ class MemoryDatabase(context: Context) :
                             filePath = c.getString(c.getColumnIndexOrThrow("path")),
                             content = c.getString(c.getColumnIndexOrThrow("content")),
                             score = c.getFloat(c.getColumnIndexOrThrow("bm25_rank")),
+                            chunkId = c.getLong(c.getColumnIndexOrThrow("chunk_id")),
                         ),
                     )
                 }
@@ -648,6 +654,7 @@ class MemoryDatabase(context: Context) :
                         filePath = sourceFileTitle(chunk.sourceFileId),
                         content = chunk.content,
                         score = -hitsHere.toFloat(),
+                        chunkId = chunk.id,
                     )
                 }
             }

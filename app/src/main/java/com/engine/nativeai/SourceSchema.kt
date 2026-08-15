@@ -68,7 +68,7 @@ object SourceSchema {
     /** BM25 search over source_chunks_fts; shared with JVM tests (sqlite-jdbc). */
     val FTS_SEARCH_SQL: String = """
         SELECT bm25(source_chunks_fts) AS bm25_rank,
-               s.title, f.path, c.content
+               s.title, f.path, c.content, c.id AS chunk_id
         FROM source_chunks_fts
         JOIN source_chunks c ON c.id = source_chunks_fts.rowid
         JOIN source_files f ON f.id = c.source_file_id

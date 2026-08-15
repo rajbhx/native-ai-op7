@@ -109,6 +109,12 @@ class JdbcSourceStore(private val conn: Connection) : SourceStore {
             }
         }
 
+    override fun chunkById(id: Long): SourceChunk? =
+        conn.prepareStatement("SELECT * FROM source_chunks WHERE id = ?").use { ps ->
+            ps.setLong(1, id)
+            ps.executeQuery().use { rs -> if (rs.next()) rs.toSourceChunk() else null }
+        }
+
     override fun sourceFiles(sourceId: Long): List<SourceFile> =
         conn.prepareStatement("SELECT * FROM source_files WHERE source_id = ? ORDER BY path ASC").use { ps ->
             ps.setLong(1, sourceId); ps.executeQuery().use { rs ->
@@ -235,6 +241,7 @@ class JdbcSourceStore(private val conn: Connection) : SourceStore {
                                     filePath = rs.getString("path"),
                                     content = rs.getString("content"),
                                     score = rs.getFloat("bm25_rank"),
+                                    chunkId = rs.getLong("chunk_id"),
                                 ),
                             )
                         }
@@ -259,6 +266,7 @@ class JdbcSourceStore(private val conn: Connection) : SourceStore {
                             filePath = sourceFileTitle(chunk.sourceFileId),
                             content = chunk.content,
                             score = -n.toFloat(),
+                            chunkId = chunk.id,
                         )
                     }
                 }

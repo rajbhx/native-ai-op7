@@ -14,6 +14,7 @@ interface SourceStore {
     fun sources(): List<Source>
     fun collections(): List<SourceCollection>
     fun sourceFiles(sourceId: Long): List<SourceFile>
+    fun chunkById(id: Long): SourceChunk?
     fun upsertSourceFile(f: SourceFile): Long
     fun deleteSourceFile(fileId: Long)
     fun replaceSourceChunks(sourceId: Long, fileId: Long, chunks: List<String>)

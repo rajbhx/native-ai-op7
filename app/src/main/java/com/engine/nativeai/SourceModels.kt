@@ -59,6 +59,7 @@ data class SourceSearchHit(
     val filePath: String,
     val content: String,
     val score: Float,
+    val chunkId: Long = 0,
 )
 
 /** Stable capabilities; never fabricated (mirrors model metadata rules). */
