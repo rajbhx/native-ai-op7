@@ -15,6 +15,11 @@ interface AgentTool {
     val description: String
     val available: Boolean
         get() = true
+    val enabled: Boolean
+        get() = true
+    /** Backend tag for the trace (e.g. "termux"/"local"); null when not a backend tool. */
+    val backendLabel: String?
+        get() = null
     val permission: ToolPermission
         get() = ToolPermission.SAFE
     suspend fun execute(input: String): ToolOutput

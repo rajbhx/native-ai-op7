@@ -17,6 +17,7 @@ data class MemoryStats(
     val rssBytes: Long = 0,
     val rssLimitBytes: Long = 0,
     val rssOverLimit: Boolean = false,
+    val affinityApplied: Boolean = false,
 )
 
 data class BackendInfo(

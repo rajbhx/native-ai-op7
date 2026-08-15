@@ -97,6 +97,7 @@ class NativeEngine : AutoCloseable {
             rssBytes = j.optLong("rss_bytes"),
             rssLimitBytes = j.optLong("rss_limit_bytes"),
             rssOverLimit = j.optBoolean("rss_over_limit"),
+            affinityApplied = j.optBoolean("affinity_applied"),
         )
     }
 

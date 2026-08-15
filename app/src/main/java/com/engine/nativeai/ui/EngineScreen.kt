@@ -97,6 +97,7 @@ import com.engine.nativeai.ModelCostTier
 import com.engine.nativeai.ModelDiscoveryService
 import com.engine.nativeai.ModelKind
 import com.engine.nativeai.ModelDescriptor
+import com.engine.nativeai.ModelStatus
 import com.engine.nativeai.ModelInfoTool
 import com.engine.nativeai.ModelRequest
 import com.engine.nativeai.ModelRegistry
@@ -114,6 +115,8 @@ import com.engine.nativeai.TaskType
 import com.engine.nativeai.TerminalTool
 import com.engine.nativeai.TermuxStatus
 import com.engine.nativeai.ThinkingAgent
+import com.engine.nativeai.Toolbox
+import com.engine.nativeai.ToolPermission
 import com.engine.nativeai.ToolRegistry
 import com.engine.nativeai.WebSearchTool
 import java.io.File
@@ -174,6 +177,7 @@ fun EngineScreen(
     var downloadStatus by remember { mutableStateOf("") }
     var healthStatus by remember { mutableStateOf("") }
     var healthRunning by remember { mutableStateOf(false) }
+    var lastHealthMs by remember { mutableStateOf(0L) }
     val executionManager = remember { ExecutionManager(context) }
     var termuxStatus by remember { mutableStateOf(executionManager.status()) }
     var termuxReason by remember { mutableStateOf(executionManager.statusReason()) }
@@ -182,6 +186,7 @@ fun EngineScreen(
         mutableStateOf(prefs.terminalAllowlist.joinToString(", "))
     }
     var probingTermux by remember { mutableStateOf(false) }
+    var systemPromptText by remember { mutableStateOf(prefs.systemPromptOverride ?: "") }
     val downloadCancel = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
 
     LaunchedEffect(Unit) {
@@ -206,6 +211,30 @@ fun EngineScreen(
                 100,
             )
         }
+    }
+
+    // Auto health: one live check (60s cache) for the active remote model so
+    // the card never shows a stale/static quota state (C3).
+    LaunchedEffect(selectedModelId) {
+        val d = registry.list().firstOrNull { it.id == selectedModelId }
+            ?: return@LaunchedEffect
+        if (d.kind != ModelKind.REMOTE) {
+            healthStatus = ""
+            return@LaunchedEffect
+        }
+        val provider = registry.provider(d.id) ?: return@LaunchedEffect
+        if (System.currentTimeMillis() - lastHealthMs < 60_000L) return@LaunchedEffect
+        healthRunning = true
+        healthStatus = "checking\u2026"
+        healthStatus = try {
+            val h = provider.health()
+            lastHealthMs = System.currentTimeMillis()
+            val state = if (h.available) "available" else "unavailable"
+            "\u25cf $state \u00b7 ${h.latencyMs}ms \u00b7 ${h.detail}"
+        } catch (e: Exception) {
+            "health check failed: ${e.message}"
+        }
+        healthRunning = false
     }
 
     val modes = listOf("AUTO", "FREE", "LOCAL", "OFFLINE")
@@ -309,7 +338,11 @@ fun EngineScreen(
                 status = "generating via ${descriptor.id}\u2026"
                 val sb = StringBuilder()
                 provider.stream(
-                    ModelRequest(prompt = prompt, maxTokens = 64),
+                    ModelRequest(
+                        prompt = prompt,
+                        system = prefs.systemPromptOverride ?: "",
+                        maxTokens = 64,
+                    ),
                 ).collect { ev ->
                     when (ev) {
                         is ModelStreamEvent.Token -> {
@@ -641,6 +674,8 @@ fun EngineScreen(
                         localLoaded = loaded,
                         modelFileExists = modelFile.exists(),
                         modelFileSizeMb = if (modelFile.exists()) modelFile.length() / (1024L * 1024L) else null,
+                        networkAvailable = hasNetwork(context),
+                        quantTag = ModelStatus.quantTag(modelFile.name),
                         onLoadLocal = {
                             scope.launch {
                                 engineState = EngineUiState.LOADING
@@ -693,6 +728,31 @@ fun EngineScreen(
                     )
                 }
                 Spacer(Modifier.height(12.dp))
+
+                Spacer(Modifier.height(12.dp))
+
+                Text("SYSTEM PROMPT", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = systemPromptText,
+                    onValueChange = {
+                        systemPromptText = it
+                        prefs.systemPromptOverride = it.ifBlank { null }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = {
+                        Text("Optional persona/rules override (blank = default)", color = OpTextSecondary)
+                    },
+                    minLines = 2,
+                    maxLines = 5,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = OpRed,
+                        unfocusedBorderColor = OpBorder,
+                        errorBorderColor = OpRed,
+                        cursorColor = OpRed,
+                    ),
+                )
 
                 Text("TOOLS", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(6.dp))
@@ -792,6 +852,39 @@ fun EngineScreen(
                     ),
                 )
 
+                Spacer(Modifier.height(10.dp))
+                Text("TOOL INVENTORY", color = OpTextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                val toolbox = remember { Toolbox(context, engine, registry, prefs, executionManager) }
+                toolbox.tools.snapshot().forEach { td ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                    ) {
+                        Text(
+                            td.name,
+                            color = OpText,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            when {
+                                !td.enabled -> "DISABLED"
+                                !td.available -> "UNAVAILABLE"
+                                td.permission == ToolPermission.REQUIRES_APPROVAL -> "APPROVAL"
+                                td.permission == ToolPermission.PRIVILEGED -> "PRIVILEGED"
+                                else -> "AVAILABLE"
+                            },
+                            color = if (td.enabled && td.available) OpSuccess else OpTextSecondary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+
                 Spacer(Modifier.height(12.dp))
 
                 Text("HARDWARE TUNING", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -854,11 +947,17 @@ fun EngineScreen(
                         if (!ensureLocalLoaded()) return@launch
                         try {
                             val s = engine.memoryStats()
+                            val budget = MemoryPlanner.plan(
+                                modelFile.length(), contextSize, availableRamBytes(context),
+                            )
                             status = "model=${s.modelBytes / (1024 * 1024)} MB | ctx=${s.nCtx} | " +
                                 "kv=${s.kvTypeK}/${s.kvTypeV} | threads=${s.threads} | " +
                                 "gpu=${s.gpuLayers} | gpuOffload=${s.gpuOffloadSupported} | " +
                                 "rss=${s.rssBytes / (1024 * 1024)} MB" +
-                                (if (s.rssOverLimit) " | OVER 1.5GB LIMIT" else "")
+                                (if (s.rssOverLimit) " | OVER 1.5GB LIMIT" else "") +
+                                " | affinity=${if (s.affinityApplied) "pinned" else "default"}" +
+                                " | budget=${budget.totalMb.toInt()}/${budget.availableCapMb.toInt()} MB " +
+                                "maxCtx=${budget.maxSafeNctx}"
                         } catch (e: Exception) {
                             status = "stats failed: ${e.message}"
                         }
@@ -1075,26 +1174,10 @@ private fun runAgent(
     setStatus("agent running\u2026")
     setEngineState(EngineUiState.THINKING)
     setRunJob(scope.launch {
-        val memory = MemoryDatabase(context)
-        val tools = ToolRegistry().apply {
-            register(MemorySearchTool(memory))
-            register(CalculatorTool())
-            register(SystemInfoTool(engine, memory))
-            register(WebSearchTool(LocalFallbackProvider()))
-            register(FileSearchTool(context.filesDir))
-            register(ModelInfoTool(registry))
-            register(FinalAnswerTool())
-            // Execution layer (Termux-inspired abstraction, clean-room).
-            // Disabled by default: the model can never bypass the tool
-            // permission boundary or the command policy until explicitly
-            // enabled in a later phase.
-            register(
-                TerminalTool(
-                    backend = executionManager.backend(),
-                    policy = ExecutionPolicy(allowList = prefs.terminalAllowlist),
-                ).apply { setEnabled(prefs.terminalEnabled) },
-            )
-        }
+        // One construction path for agent + settings (core-hardening C1).
+        val toolbox = Toolbox(context, engine, registry, prefs, executionManager)
+        val memory = toolbox.memory
+        val tools = toolbox.tools
         val agent = ThinkingAgent(
             router = ModelRouter(mode = effectiveMode),
             registry = registry,
@@ -1102,6 +1185,7 @@ private fun runAgent(
             tools = tools,
             networkAvailable = hasNetwork(context),
             preferredId = preferredId,
+            systemPromptOverride = prefs.systemPromptOverride,
         )
         val sessionId = try {
             val id = memory.startSession("agent: ${prompt.take(60)}")
@@ -1312,6 +1396,8 @@ private fun ModelCard(
     localLoaded: Boolean,
     modelFileExists: Boolean,
     modelFileSizeMb: Long?,
+    networkAvailable: Boolean,
+    quantTag: String?,
     onLoadLocal: () -> Unit,
     onChange: () -> Unit,
 ) {
@@ -1342,9 +1428,25 @@ private fun ModelCard(
             modelMetadata(d),
             fontSize = 11.sp,
         )
+        val statusLine = ModelStatus.line(d, localLoaded, modelFileExists, networkAvailable)
+        Text(
+            statusLine,
+            color = when {
+                statusLine.startsWith("READY") || statusLine.startsWith("ONLINE") -> OpSuccess
+                statusLine.startsWith("OFFLINE") || statusLine.startsWith("NO MODEL") -> OpAmber
+                else -> OpTextSecondary
+            },
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(top = 3.dp),
+        )
         if (d.kind == ModelKind.LOCAL && modelFileSizeMb != null) {
             Text(
-                "GGUF \u00b7 ${modelFileSizeMb} MB on device",
+                buildString {
+                    append("GGUF \u00b7 ${modelFileSizeMb} MB")
+                    if (quantTag != null) append(" \u00b7 $quantTag")
+                    append(" on device")
+                },
                 color = OpTextSecondary,
                 fontSize = 10.sp,
                 modifier = Modifier.padding(top = 2.dp),

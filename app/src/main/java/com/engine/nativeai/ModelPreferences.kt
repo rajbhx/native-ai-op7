@@ -15,6 +15,7 @@ interface ModelPreferencesStore {
     var zenBaseUrl: String
     var terminalEnabled: Boolean
     var terminalAllowlist: Set<String>
+    var systemPromptOverride: String?
     fun favorites(): Set<String>
     fun isFavorite(id: String): Boolean
     fun toggleFavorite(id: String): Set<String>
@@ -28,6 +29,7 @@ class InMemoryModelPreferences : ModelPreferencesStore {
     override var zenBaseUrl: String = ModelCatalog.ZEN_BASE_URL
     override var terminalEnabled: Boolean = false
     override var terminalAllowlist: Set<String> = emptySet()
+    override var systemPromptOverride: String? = null
     private val favs = mutableSetOf<String>()
     override fun favorites(): Set<String> = favs.toSet()
     override fun isFavorite(id: String): Boolean = id in favs
@@ -80,6 +82,16 @@ class ModelPreferences(context: Context) : ModelPreferencesStore {
         get() = prefs.getStringSet("terminal_allowlist", emptySet()) ?: emptySet()
         set(value) {
             prefs.edit().putStringSet("terminal_allowlist", value).apply()
+        }
+
+    override var systemPromptOverride: String?
+        get() = prefs.getString("system_prompt_override", null)
+        set(value) {
+            if (value.isNullOrBlank()) {
+                prefs.edit().remove("system_prompt_override").apply()
+            } else {
+                prefs.edit().putString("system_prompt_override", value).apply()
+            }
         }
 
     override fun favorites(): Set<String> =

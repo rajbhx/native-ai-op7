@@ -10,7 +10,7 @@ class TerminalTool(
     @Volatile private var enabledFlag: Boolean = false,
 ) : AgentTool {
 
-    val enabled: Boolean get() = enabledFlag
+    override val enabled: Boolean get() = enabledFlag
 
     fun setEnabled(value: Boolean) {
         enabledFlag = value
@@ -21,6 +21,8 @@ class TerminalTool(
         "Run one shell command on this device, return exit code + output."
     override val permission = ToolPermission.REQUIRES_APPROVAL
     override val available: Boolean get() = enabledFlag && backend.available
+    override val backendLabel: String?
+        get() = if (backend is TermuxBackend) "termux" else "local"
 
     override suspend fun execute(input: String): ToolOutput {
         if (!available) {
@@ -32,7 +34,7 @@ class TerminalTool(
         }
         val result = backend.execute(ExecutionRequest(command = command, timeoutMs = 15_000))
         val text = buildString {
-            append("exit=").append(result.exitCode)
+            append("[${backendLabel ?: "?"}] exit=").append(result.exitCode)
             if (result.timedOut) append(" [timed out]")
             if (result.cancelled) append(" [cancelled]")
             append("\n")

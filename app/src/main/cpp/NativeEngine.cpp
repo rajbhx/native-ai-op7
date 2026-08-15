@@ -114,6 +114,7 @@ bool NativeEngine::init(const Config& config) {
         const std::vector<int> cores = hw::highCores();
         if (!cores.empty() && static_cast<int>(cores.size()) >= config_.threads) {
             const bool pinned = hw::pinCurrentThread(cores);
+            affinity_pinned_ = pinned;
             __android_log_print(
                 ANDROID_LOG_INFO, "NativeEngineJNI",
                 pinned ? "Successfully pinned execution thread %ld to Kryo 485 Gold/Prime cores (%d cores)"
@@ -263,7 +264,8 @@ void NativeEngine::generateStream(const std::string& prompt,
 
 std::string NativeEngine::memoryStatsJson() const {
     return MemoryMonitor::statsJson(model_, ctx_, config_.threads,
-                                    config_.gpu_layers, type_k_, type_v_);
+                                    config_.gpu_layers, type_k_, type_v_,
+                                    affinity_pinned_);
 }
 
 std::string NativeEngine::backendInfoJson() const {

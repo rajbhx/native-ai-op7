@@ -27,6 +27,7 @@ class ThinkingAgent(
     private val allowPaid: Boolean = false,
     private val preferLocal: Boolean = false,
     private val preferredId: String? = null,
+    private val systemPromptOverride: String? = null,
 ) {
     fun run(
         userPrompt: String,
@@ -90,7 +91,7 @@ class ThinkingAgent(
                 }
                 val userCtx = contextManager.build("", userPrompt, ctx, observations)
                 val request = ModelRequest(
-                    system = systemPrompt(),
+                    system = systemPromptOverride ?: systemPrompt(),
                     prompt = ContextAdapter.fit(userCtx.trim(), descriptor.contextLength ?: 2048),
                     maxTokens = config.maxTokens,
                     temperature = config.temperature,

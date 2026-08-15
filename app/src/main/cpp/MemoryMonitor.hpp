@@ -11,7 +11,8 @@ class MemoryMonitor {
 public:
     static std::string statsJson(const llama_model* model, const llama_context* ctx,
                                  int32_t threads, int32_t gpu_layers,
-                                 enum ggml_type type_k, enum ggml_type type_v);
+                                 enum ggml_type type_k, enum ggml_type type_v,
+                                 bool affinity_applied);
     static std::string backendJson(const llama_context* ctx,
                                    int32_t threads, int32_t gpu_layers,
                                    enum ggml_type type_k, enum ggml_type type_v);

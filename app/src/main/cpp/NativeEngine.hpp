@@ -73,4 +73,5 @@ private:
     enum ggml_type type_k_ = GGML_TYPE_Q8_0;
     enum ggml_type type_v_ = GGML_TYPE_Q8_0;
     std::atomic<bool> cancel_{false};
+    bool affinity_pinned_ = false;
 };
