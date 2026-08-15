@@ -134,4 +134,42 @@ class ModelRouterTest {
         assertNotNull(d)
         assertEquals("remote-free", d?.id)
     }
+
+    @Test
+    fun explicitPreferredRemoteWinsDespiteHealthMarks() {
+        val router = ModelRouter(RoutingMode.HYBRID)
+        router.reportFailure("remote-free", "429 rate limited")
+        router.reportFailure("remote-free", "429 rate limited")
+        val d = router.route(
+            task(network = true),
+            registry(local = true, freeRemote = true),
+            preferredId = "remote-free",
+        )
+        assertNotNull(d)
+        assertEquals("remote-free", d?.id)
+    }
+
+    @Test
+    fun explicitPreferredRemoteWinsForSimpleChatInHybrid() {
+        val router = ModelRouter(RoutingMode.HYBRID)
+        val d = router.route(
+            task(network = true),
+            registry(local = true, freeRemote = true),
+            preferredId = "remote-free",
+        )
+        assertNotNull(d)
+        assertEquals("remote-free", d?.id)
+    }
+
+    @Test
+    fun explicitPreferredPaidNeverAllowedInFreeOnly() {
+        val router = ModelRouter(RoutingMode.FREE_ONLY)
+        val d = router.route(
+            task(network = true, allowPaid = true),
+            registry(local = true, freeRemote = true, paid = true),
+            preferredId = "remote-paid",
+        )
+        assertNotNull(d)
+        assertEquals("remote-free", d?.id)
+    }
 }

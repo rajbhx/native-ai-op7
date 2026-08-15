@@ -12,8 +12,12 @@ class LocalModelProvider(
     private val config: EngineConfig,
 ) : ModelProvider {
 
+    companion object {
+        const val LOCAL_MODEL_ID = "local-llama"
+    }
+
     override val descriptor = ModelDescriptor(
-        id = "local-llama",
+        id = LOCAL_MODEL_ID,
         displayName = "Local llama.cpp (OP7)",
         provider = "local",
         endpoint = "native://llama.cpp",

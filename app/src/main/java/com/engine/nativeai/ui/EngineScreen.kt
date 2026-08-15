@@ -65,6 +65,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.engine.nativeai.AgentEvent
 import com.engine.nativeai.AgentState
+import com.engine.nativeai.AgentTask
 import com.engine.nativeai.CalculatorTool
 import com.engine.nativeai.EngineForegroundService
 import com.engine.nativeai.EngineConfig
@@ -83,15 +84,19 @@ import com.engine.nativeai.ModelDiscoveryService
 import com.engine.nativeai.ModelKind
 import com.engine.nativeai.ModelDescriptor
 import com.engine.nativeai.ModelInfoTool
+import com.engine.nativeai.ModelRequest
 import com.engine.nativeai.ModelRegistry
 import com.engine.nativeai.ModelPreferencesStore
 import com.engine.nativeai.ModelRouter
+import com.engine.nativeai.ModelStreamEvent
 import com.engine.nativeai.OpenAICompatibleProvider
 import com.engine.nativeai.PrivacyMode
 import com.engine.nativeai.ProviderRegistry
+import com.engine.nativeai.RemoteProviderBootstrap
 import com.engine.nativeai.NativeEngine
 import com.engine.nativeai.RoutingMode
 import com.engine.nativeai.SystemInfoTool
+import com.engine.nativeai.TaskType
 import com.engine.nativeai.ThinkingAgent
 import com.engine.nativeai.ToolRegistry
 import com.engine.nativeai.WebSearchTool
@@ -149,6 +154,9 @@ fun EngineScreen(
         // afterwards; manual Refresh is always available in the picker).
         if (registry.lastRefreshMs == 0L) {
             val r = discovery.refresh()
+            // Newly discovered descriptors need live providers before the
+            // router (and the persisted selection) can use them.
+            RemoteProviderBootstrap.registerRemoteProviders(registry, providerRegistry)
             if (r.error != null) {
                 status = "catalog: cached seeds (${r.error})"
             }
@@ -316,15 +324,55 @@ fun EngineScreen(
                     if (prompt.isBlank()) return@Button
                     runJob = scope.launch {
                         try {
-                            if (!ensureLocalLoaded()) return@launch
+                            val effectiveMode = if (prefs.privacyMode == PrivacyMode.LOCAL_ONLY) {
+                                RoutingMode.OFFLINE_ONLY
+                            } else {
+                                routingModes[selectedMode]
+                            }
+                            val descriptor = ModelRouter(effectiveMode).route(
+                                AgentTask(
+                                    prompt = prompt,
+                                    taskType = TaskType.CHAT,
+                                    contextLength = contextSize,
+                                    networkAvailable = hasNetwork(context),
+                                ),
+                                registry,
+                                preferredId = selectedModelId,
+                            )
+                            if (descriptor == null) {
+                                status = "no model available for quick completion"
+                                engineState = EngineUiState.ERROR
+                                return@launch
+                            }
+                            if (descriptor.kind == ModelKind.LOCAL && !ensureLocalLoaded()) {
+                                return@launch
+                            }
+                            val provider = registry.providerFor(descriptor)
+                            if (provider == null) {
+                                status = "provider not ready: ${descriptor.id}"
+                                engineState = EngineUiState.ERROR
+                                return@launch
+                            }
                             running = true
                             output = ""
                             answer = ""
                             engineState = EngineUiState.THINKING
-                            status = "generating\u2026"
+                            status = "generating via ${descriptor.id}\u2026"
                             val sb = StringBuilder()
-                            engine.generateStream(prompt, GenerationConfig(maxTokens = 64))
-                                .collect { sb.append(it); answer = sb.toString() }
+                            provider.stream(
+                                ModelRequest(prompt = prompt, maxTokens = 64),
+                            ).collect { ev ->
+                                when (ev) {
+                                    is ModelStreamEvent.Token -> {
+                                        sb.append(ev.text)
+                                        answer = sb.toString()
+                                    }
+                                    is ModelStreamEvent.Reasoning -> Unit
+                                    is ModelStreamEvent.Done -> Unit
+                                    is ModelStreamEvent.Error ->
+                                        throw IllegalStateException(ev.message)
+                                }
+                            }
                             status = "generation complete (${sb.length} chars)"
                             engineState = EngineUiState.COMPLETED
                         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -352,7 +400,7 @@ fun EngineScreen(
             }
         }
         Text(
-            "\u2191 Send \u00b7 quick local completion \u2014 Agent runs the full tool loop",
+            "\u2191 Send \u00b7 quick completion with selected model \u2014 Agent runs the full tool loop",
             color = OpTextSecondary,
             fontSize = 10.sp,
             modifier = Modifier.padding(top = 4.dp, start = 2.dp),
@@ -628,6 +676,7 @@ fun EngineScreen(
             onRefresh = {
                 scope.launch {
                     val r = discovery.refresh()
+                    RemoteProviderBootstrap.registerRemoteProviders(registry, providerRegistry)
                     status = if (r.error == null) {
                         "discovery: ${r.found} new models, ${registry.list().size} total (${r.endpoint})"
                     } else {

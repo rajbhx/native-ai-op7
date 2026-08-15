@@ -27,7 +27,10 @@ class ModelRouter(
         if (candidates.isEmpty()) return null
 
         // A user-picked model wins only when the current mode allows it
-        // (offline mode forbids remote; free-only forbids paid).
+        // (offline mode forbids remote; free-only forbids paid). Explicit
+        // selections are attempted even under transient failure marks so the
+        // agent never silently substitutes the local model; real failures
+        // surface in the trace and the agent's fallback loop handles them.
         preferredId?.let { id ->
             candidates.firstOrNull { it.id == id }?.let { d ->
                 val allowed = when (mode) {
@@ -37,7 +40,7 @@ class ModelRouter(
                             (d.kind == ModelKind.REMOTE && d.costTier == ModelCostTier.FREE)
                     else -> true
                 }
-                if (allowed && healthMonitor.isHealthy(d.id)) return d
+                if (allowed) return d
             }
         }
 

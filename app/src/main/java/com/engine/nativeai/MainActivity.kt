@@ -31,18 +31,13 @@ class MainActivity : ComponentActivity() {
             ModelCatalog.freeRemoteSeeds().forEach { addDescriptor(it) }
             loadCatalog()
         }
-        // Re-register the persisted remote selection so the agent can route to
-        // it right after a process restart (keys stay runtime-only).
-        prefs.lastSelectedModelId?.let { id ->
-            registry.get(id)?.takeIf { it.kind == ModelKind.REMOTE && registry.provider(id) == null }?.let { d ->
-                registry.register(
-                    OpenAICompatibleProvider(
-                        descriptor = d,
-                        apiKey = providerRegistry.apiKey(d.provider),
-                    ),
-                )
-            }
-        }
+        // Re-hydrate remote providers so the persisted selection (and any
+        // cached discovered model) routes correctly right after a restart.
+        RemoteProviderBootstrap.ensurePersistedSelection(
+            registry,
+            providerRegistry,
+            prefs.lastSelectedModelId,
+        )
         val discovery = ModelDiscoveryService(registry, providerRegistry)
         setContent {
             OxygenOSTheme {

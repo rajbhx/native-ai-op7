@@ -15,18 +15,19 @@ object ModelCatalog {
     const val ZEN_PROVIDER = "opencode-zen"
 
     fun freeRemoteSeeds(): List<ModelDescriptor> = listOf(
-        zenSeed("big-pickle", "Big Pickle"),
-        zenSeed("deepseek-v4-flash-free", "DeepSeek V4 Flash Free"),
-        zenSeed("mimo-v2.5-free", "MiMo-V2.5 Free"),
-        zenSeed("laguna-s-2.1-free", "Laguna S 2.1 Free"),
-        zenSeed("ling-3.0-flash-free", "Ling-3.0-flash Free"),
-        zenSeed("north-mini-code-free", "North Mini Code Free"),
-        zenSeed("nemotron-3-ultra-free", "Nemotron 3 Ultra Free"),
+        zenDescriptor("big-pickle", "Big Pickle"),
+        zenDescriptor("deepseek-v4-flash-free", "DeepSeek V4 Flash Free"),
+        zenDescriptor("mimo-v2.5-free", "MiMo-V2.5 Free"),
+        zenDescriptor("laguna-s-2.1-free", "Laguna S 2.1 Free"),
+        zenDescriptor("ling-3.0-flash-free", "Ling-3.0-flash Free"),
+        zenDescriptor("north-mini-code-free", "North Mini Code Free"),
+        zenDescriptor("nemotron-3-ultra-free", "Nemotron 3 Ultra Free"),
     )
 
-    private fun zenSeed(id: String, displayName: String) = ModelDescriptor(
+    /** Public descriptor builder for any discovered or persisted Zen model id. */
+    fun zenDescriptor(id: String, displayName: String? = null) = ModelDescriptor(
         id = id,
-        displayName = displayName,
+        displayName = displayName ?: ModelDiscoveryService.prettify(id),
         provider = ZEN_PROVIDER,
         endpoint = ZEN_BASE_URL,
         modelType = "chat",

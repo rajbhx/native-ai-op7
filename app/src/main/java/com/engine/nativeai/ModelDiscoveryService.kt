@@ -87,6 +87,7 @@ class ModelDiscoveryService(
                     )
                 }
                 val upserted = registry.upsertRemote(discovered)
+                registry.saveCatalog() // best-effort cache for offline restarts
                 providerRegistry.setLastRefresh(ModelCatalog.ZEN_PROVIDER, now)
                 DiscoveryResult(upserted, endpoint, now)
             } catch (e: Exception) {
