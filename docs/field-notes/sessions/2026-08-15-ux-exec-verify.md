@@ -102,3 +102,26 @@
   (/tmp/op7-t1b.xml: UNDERSTAND -> big-pickle/opencode-zen REMOTE -> PLAN ->
   local-llama -> FINALIZE -> STORE -> FINAL, header COMPLETED) but must be
   re-run on the fixed build for the record.
+
+## Revision d753a22 — calculator parsing + tool-result observability (CI green)
+- **P Test 1 calculator 0/3 failure mode could not be diagnosed.**
+  cause: `ToolExecutor` persisted only `output` (empty on failure) and a bare
+  input hash; the model's expression and the tool error were lost. SafeExpr
+  also rejected exponent notation and grouped numbers (`1e9`, `1,000,000`),
+  which 1B models emit routinely for "3 billion * 4.5 bits" style math.
+  solution: schema v2 (`tool_results.input`, `error_summary` columns,
+  SCHEMA_VERSION 2, dev drop-recreate migration) + `SafeExpr` e-notation and
+  comma thousands separators. Verified standalone with kotlinc: 10/10 checks
+  pass (new + existing behaviors); CI run 31865457792 GREEN (compile + full
+  JVM suite). On-device Test 1 re-run PENDING (device in use) - expect the
+  next run to record real input/error rows and succeed on expressions like
+  `3 * 4.5e9 / 8`.
+  section: A
+  tags: [calculator, safeexpr, observability, schema, ci]
+- **Vision re-anchored to the original memory-first master prompt.**
+  Added docs/VISION-MEMORY-FIRST.md (requirement-by-requirement map, 20 rows:
+  shipped/partial/planned) + ROADMAP north-star pointer. Key gaps now ranked:
+  conversation store + Memory screen (M1), knowledge update/OUTDATED (M2),
+  WebResearchEngine (M3), ResearchAgent (M4), training schema v2 (M5).
+  section: A
+  tags: [vision, roadmap, memory-first, plan]
