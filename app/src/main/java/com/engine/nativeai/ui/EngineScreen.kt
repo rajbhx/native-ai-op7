@@ -125,7 +125,12 @@ fun EngineScreen(
     var status by remember {
         mutableStateOf("Engine library loaded. Put a GGUF at:\n${modelFile.absolutePath}")
     }
-    var prompt by remember { mutableStateOf("") }
+    // Test/automation hook: launch with --es prompt "..." to seed the field
+    // without the IME (adb am start ... --es prompt "text").
+    val intentPrompt = remember {
+        (context as? android.app.Activity)?.intent?.getStringExtra("prompt")
+    }
+    var prompt by remember { mutableStateOf(intentPrompt ?: "") }
     var output by remember { mutableStateOf("") }
     var answer by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
