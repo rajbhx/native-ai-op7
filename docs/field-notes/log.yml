@@ -194,3 +194,13 @@ sections:
         cause: "user pointed at MemPalace/mempalace (MIT) as a source of ideas for later phases"
         solution: "recorded docs/source-research/mempalace-reference.md: scoped hierarchy (wings/rooms/drawers) maps to collections/sources/files-chunks; pluggable backend seam matches SourceStore/MemoryProvider; hybrid keyword fallback validates FTS5+LIKE; embedder sizes (~80 MB minilm) give ADR-007 a real budget figure; LongMemEval R@5 as a future benchmark; keep read_time eviction for verbatim-growth control"
         tags: [memory, sources, reference, research]
+      - id: A39
+        problem: "local model support was hardcoded to one fixed path (models/model.gguf) in nine EngineScreen call sites; multiple GGUFs were impossible and LocalModelProvider always exposed descriptor id local-llama"
+        cause: "MainActivity registered one LocalModelProvider; UI built modelFile from a fixed path; provider descriptor was a constant, so per-file providers would collide"
+        solution: "LocalModelLibrary (pure JVM) scans models/*.gguf with stable ids (model.gguf -> local-llama, others -> local-<stem>); descriptor-override param on LocalModelProvider so each file gets its own provider sharing one NativeEngine; syncInto drops deleted files and keeps a local-llama placeholder when empty; LocalModelImporter (SAF) with progress + StatFs +64 MB margin + GGUF magic guard + temp rename; RemoteProviderBootstrap skips all local-* ids; picker '＋ Pick GGUF from storage…' row + size/quant subtitles; model card Delete; loadedPath guard reloads on model switch"
+        tags: [models, local, gguf, saf, multi-model]
+      - id: A40
+        problem: "no observability: AgentEvent lacked timestamps/durations, tool timings and tok/s were untracked, Stats only dumped memoryStats() to the status line"
+        cause: "no metrics contract; trace events were plain data; no jank/leak tooling"
+        solution: "RuntimeMetrics (load, first-token, tok/s, per-tool, errors/retries, restarts, jank) + DiagnosticsProvider/RuntimeDiagnostics + DiagnosticsDialog; AgentEvent atMs/durationMs with timestamped trace lines (TraceLine strips the prefix); FrameJankMonitor (Choreographer, no dep); LeakCanary debugImplementation only; .maestro/acceptance flows on the physical device (arm64-only APK cannot run on x86_64 CI emulators); docs/source-research/perf-observability-reference.md + license review rows"
+        tags: [observability, metrics, diagnostics, jank, leakcanary, maestro]
