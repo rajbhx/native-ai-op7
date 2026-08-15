@@ -34,7 +34,8 @@ class ChatHistoryTest {
         val sessions = history.recent()
         assertEquals(listOf(2L, 1L), sessions.map { it.id }) // store returns newest-first
         assertEquals(listOf("user", "agent"), sessions[0].messages.map { it.role })
-        assertEquals("prompt one", sessions[0].messages[0].content)
+        assertEquals("prompt two", sessions[0].messages[0].content) // sessions[0] = most recent
+        assertEquals("prompt one", sessions[1].messages[0].content)
     }
 
     @Test
