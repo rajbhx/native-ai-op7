@@ -162,7 +162,13 @@ fun EngineScreen(
     var loaded by remember { mutableStateOf(false) }
     var loadedPath by remember { mutableStateOf<String?>(null) }
     var status by remember {
-        mutableStateOf("Engine library loaded. Put a GGUF in:\n${modelsDir.absolutePath}")
+        mutableStateOf(
+            if (localModels.isEmpty()) {
+                "No GGUF model found \u2014 use Download GGUF or \u201c+ Pick GGUF from storage\u201d"
+            } else {
+                "Local library ready: ${localModels.joinToString { it.file.name }}"
+            },
+        )
     }
     var prompt by remember { mutableStateOf(initialPrompt ?: "") }
     var output by remember { mutableStateOf("") }
@@ -451,10 +457,19 @@ fun EngineScreen(
 
     // Stop aborts the running agent/generation and records it in the trace.
     fun stopRun() {
+        if (runJob == null) {
+            engine.cancel()
+            return
+        }
+        // Native llama.cpp decode is a blocking call that coroutine
+        // cancellation alone cannot interrupt. Request native cancellation
+        // first, then cancel the job. Keep `running` true until the job
+        // unwinds in `finally` so a new run cannot start while the native
+        // engine is still decoding the previous turn (prevents overlapping
+        // generations on one context, which corrupted the graph and crashed
+        // in ggml_compute_forward_rope).
+        engine.cancel()
         runJob?.cancel()
-        runJob = null
-        running = false
-        engineState = EngineUiState.READY
         status = "agent stopped"
         if (output.isNotBlank()) {
             output = output.trimEnd('\n') + "\n[STOPPED]"
@@ -737,6 +752,7 @@ fun EngineScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp)
                     .padding(bottom = 32.dp),
             ) {
