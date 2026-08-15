@@ -2,9 +2,11 @@ package com.engine.nativeai.ui
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
@@ -73,6 +75,7 @@ import com.engine.nativeai.FileSearchTool
 import com.engine.nativeai.FinalAnswerTool
 import com.engine.nativeai.GenerationConfig
 import com.engine.nativeai.LocalFallbackProvider
+import com.engine.nativeai.LocalModelProvider
 import com.engine.nativeai.MemoryDatabase
 import com.engine.nativeai.ModelDownloader
 import com.engine.nativeai.DownloadResult
@@ -138,7 +141,13 @@ fun EngineScreen(
     var serviceOn by remember { mutableStateOf(false) }
     var engineState by remember { mutableStateOf(EngineUiState.READY) }
     var selectedMode by remember { mutableStateOf(modeIndexFor(prefs.routingMode)) }
-    var selectedModelId by remember { mutableStateOf(prefs.lastSelectedModelId ?: "local-llama") }
+    var selectedModelId by remember {
+        val persisted = prefs.lastSelectedModelId
+        mutableStateOf(
+            if (persisted != null && registry.list().any { it.id == persisted }) persisted
+            else LocalModelProvider.LOCAL_MODEL_ID,
+        )
+    }
     var favorites by remember { mutableStateOf(prefs.favorites()) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     var runJob by remember { mutableStateOf<Job?>(null) }
@@ -152,6 +161,8 @@ fun EngineScreen(
     var downloading by remember { mutableStateOf(false) }
     var downloadProgress by remember { mutableStateOf<Float?>(null) }
     var downloadStatus by remember { mutableStateOf("") }
+    var healthStatus by remember { mutableStateOf("") }
+    var healthRunning by remember { mutableStateOf(false) }
     val downloadCancel = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
 
     LaunchedEffect(Unit) {
@@ -185,7 +196,7 @@ fun EngineScreen(
     val models = registry.list()
     val selected = models.firstOrNull { it.id == selectedModelId }
     val (connText, connColor) = when {
-        selected == null -> "not found" to OpRed
+        selected == null -> "select a model" to OpAmber
         selected.kind == ModelKind.LOCAL ->
             if (modelFile.exists()) "Available" to Color(0xFF2ECC71)
             else "No model file" to OpRed
@@ -276,14 +287,18 @@ fun EngineScreen(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             Text(
-                "Model \u00b7 ${selectedModelName(models, selectedModelId)}",
+                if (selected == null) "Model \u00b7 none selected" else "Model \u00b7 ${selected.displayName}",
                 color = OpText,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f),
             )
             Text(
-                activeModelSummary(selected),
+                if (selected == null) "tap to choose" else activeModelSummary(
+                    selected,
+                    modelFile.exists(),
+                    providerRegistry.apiKey(selected.provider).isNotBlank(),
+                ),
                 color = OpTextSecondary,
                 fontSize = 11.sp,
             )
@@ -560,6 +575,7 @@ fun EngineScreen(
                         connectionColor = connColor,
                         localLoaded = loaded,
                         modelFileExists = modelFile.exists(),
+                        modelFileSizeMb = if (modelFile.exists()) modelFile.length() / (1024L * 1024L) else null,
                         onLoadLocal = {
                             scope.launch {
                                 engineState = EngineUiState.LOADING
@@ -574,6 +590,35 @@ fun EngineScreen(
                             showPicker = true
                         },
                     )
+                }
+                if (selected != null && selected.kind == ModelKind.REMOTE &&
+                    registry.provider(selected.id) != null
+                ) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        PillButton(
+                            if (healthRunning) "Checking\u2026" else "Check health",
+                            modifier = Modifier.weight(1f),
+                            enabled = !healthRunning,
+                        ) {
+                            scope.launch {
+                                healthRunning = true
+                                healthStatus = "checking\u2026"
+                                healthStatus = try {
+                                    val h = registry.provider(selected.id)!!.health()
+                                    val state = if (h.available) "available" else "unavailable"
+                                    "\u25cf $state \u00b7 ${h.latencyMs}ms \u00b7 ${h.detail}"
+                                } catch (e: Exception) {
+                                    "health check failed: ${e.message}"
+                                }
+                                healthRunning = false
+                            }
+                        }
+                    }
+                    if (healthStatus.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(healthStatus, color = OpTextSecondary, fontSize = 10.sp)
+                    }
                 }
                 if (registry.lastRefreshMs > 0) {
                     Text(
@@ -1026,17 +1071,19 @@ private fun modeIndexFor(mode: RoutingMode): Int = when (mode) {
     RoutingMode.OFFLINE_ONLY -> 3 // OFFLINE
 }
 
-private fun selectedModelName(models: List<ModelDescriptor>, id: String?): String =
-    models.firstOrNull { it.id == id }?.displayName ?: (id ?: "none")
-
-private fun activeModelSummary(d: ModelDescriptor?): String {
-    if (d == null) return "not selected"
+private fun activeModelSummary(d: ModelDescriptor, hasModelFile: Boolean, hasKey: Boolean): String {
     val tier = when (d.costTier) {
         ModelCostTier.FREE -> "FREE"
         ModelCostTier.PAID -> "PAID"
         ModelCostTier.UNKNOWN -> if (d.kind == ModelKind.LOCAL) "LOCAL" else "?"
     }
-    return "$tier \u00b7 ${d.contextLength ?: "?"} ctx"
+    val ctx = d.contextLength?.let { "$it ctx" } ?: "? ctx"
+    val access = if (d.kind == ModelKind.LOCAL) {
+        if (hasModelFile) "gguf" else "no file"
+    } else {
+        if (hasKey) "key" else "anon"
+    }
+    return "$tier \u00b7 $ctx \u00b7 $access"
 }
 
 private fun formatCatalogTime(epochMs: Long): String {
@@ -1067,6 +1114,7 @@ private fun ModelCard(
     connectionColor: Color,
     localLoaded: Boolean,
     modelFileExists: Boolean,
+    modelFileSizeMb: Long?,
     onLoadLocal: () -> Unit,
     onChange: () -> Unit,
 ) {
@@ -1097,6 +1145,14 @@ private fun ModelCard(
             modelMetadata(d),
             fontSize = 11.sp,
         )
+        if (d.kind == ModelKind.LOCAL && modelFileSizeMb != null) {
+            Text(
+                "GGUF \u00b7 ${modelFileSizeMb} MB on device",
+                color = OpTextSecondary,
+                fontSize = 10.sp,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -1240,6 +1296,23 @@ private fun ApiKeyDialog(
                         "Entered keys live only in memory for this session \u2014 never persisted or logged.",
                     color = OpTextSecondary,
                     fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Free OpenCode account for a higher quota: opencode.ai/auth \u2197",
+                    color = OpBlue,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clickable {
+                            try {
+                                LocalContext.current.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse("https://opencode.ai/auth")),
+                                )
+                            } catch (_: Exception) {
+                            }
+                        }
+                        .padding(vertical = 4.dp),
                 )
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
