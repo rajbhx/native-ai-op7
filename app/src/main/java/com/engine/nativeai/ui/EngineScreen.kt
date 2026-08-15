@@ -130,8 +130,10 @@ import com.engine.nativeai.ToolPermission
 import com.engine.nativeai.ToolRegistry
 import com.engine.nativeai.WebSearchTool
 import java.io.File
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * OxygenOS Model Hub + Live Agent Trace dashboard (blueprint Phase 6).
@@ -204,6 +206,9 @@ fun EngineScreen(
     var healthRunning by remember { mutableStateOf(false) }
     var lastHealthMs by remember { mutableStateOf(0L) }
     val executionManager = remember { ExecutionManager(context) }
+    // One construction path for tools + sources (core-hardening C1): the
+    // sheet inventory, the agent and the startup refresh share this instance.
+    val toolbox = remember { Toolbox(context, engine, registry, prefs, executionManager) }
     var termuxStatus by remember { mutableStateOf(executionManager.status()) }
     var termuxReason by remember { mutableStateOf(executionManager.statusReason()) }
     var terminalEnabled by remember { mutableStateOf(prefs.terminalEnabled) }
@@ -254,6 +259,14 @@ fun EngineScreen(
                     }
                 }
             }
+        }
+    }
+
+    // Startup source refresh (roadmap Phase 8): bounded, interruptible,
+    // only due sources, only when online. Never blocks the UI.
+    LaunchedEffect(Unit) {
+        if (hasNetwork(context)) {
+            withContext(Dispatchers.IO) { toolbox.sourceUpdater.updateOnce() }
         }
     }
 
@@ -648,11 +661,9 @@ fun EngineScreen(
                     if (selected != null && selected.kind == ModelKind.LOCAL && !ensureLocalLoaded()) return@launch
                     runAgent(
                         context = context,
-                        engine = engine,
                         registry = registry,
-                        providerRegistry = providerRegistry,
                         prefs = prefs,
-                        executionManager = executionManager,
+                        toolbox = toolbox,
                         prompt = prompt,
                         mode = routingModes[selectedMode],
                         modeLabel = modes[selectedMode],
@@ -992,7 +1003,6 @@ fun EngineScreen(
                 Spacer(Modifier.height(10.dp))
                 Text("TOOL INVENTORY", color = OpTextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
-                val toolbox = remember { Toolbox(context, engine, registry, prefs, executionManager) }
                 toolbox.tools.snapshot().forEach { td ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -1369,11 +1379,9 @@ private enum class EngineUiState(val label: String) {
 
 private fun runAgent(
     context: Context,
-    engine: NativeEngine,
     registry: ModelRegistry,
-    providerRegistry: ProviderRegistry,
     prefs: ModelPreferencesStore,
-    executionManager: ExecutionManager,
+    toolbox: Toolbox,
     prompt: String,
     mode: RoutingMode,
     modeLabel: String,
@@ -1400,8 +1408,6 @@ private fun runAgent(
     setStatus("agent running\u2026")
     setEngineState(EngineUiState.THINKING)
     setRunJob(scope.launch {
-        // One construction path for agent + settings (core-hardening C1).
-        val toolbox = Toolbox(context, engine, registry, prefs, executionManager)
         val memory = toolbox.memory
         val tools = toolbox.tools
         val agent = ThinkingAgent(
