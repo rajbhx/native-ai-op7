@@ -19,7 +19,7 @@ Gate for every item: CI green -> on-device verified -> field note.
 | 4 | Dynamically discovered free providers | ✅ OpenCode Zen catalog discovery, health monitor, cache + persistence, re-hydration | keep refreshable; never hard-code availability |
 | 5 | `ModelRouter` picks best source | ✅ AUTO/FREE/LOCAL/OFFLINE, capability-aware, explicit selection wins | tool-only / memory-only fallback tiers |
 | 6 | No single-model lock-in; survive provider loss | ✅ fallback remote -> alternate -> local (max 3 attempts) | same |
-| 7 | Persistent memory is the core | 🟡 SQLite + FTS5 (OP7 fallback), experiences/facts/sessions/tool_results, BM25 + decay + ranking | missing stores: conversations, notes, problems, solutions, research, projects, failures |
+| 7 | Persistent memory is the core | 🟡 SQLite + FTS5 (OP7 fallback), experiences/facts/sessions/tool_results + messages (v3, M1a), BM25 + decay + ranking | missing stores: notes, problems, solutions, research, projects, failures; Memory screen (M1b) |
 | 8 | Memory update, never blind overwrite | 🟡 `semantic_facts` with confidence/last_verified | old/new knowledge versioning + OUTDATED marking |
 | 9 | Internet + memory contradiction detection | ⬜ | part of `WebResearchEngine` |
 | 10 | Self-learning loop | 🟡 verified-experience JSONL export + eligibility gate | quality filters, dedupe-by-semantics, dataset versioning |
@@ -48,7 +48,8 @@ device (STORE currently did not write an experience row in Test 1 - verify).
 
 - In flight (this revision): tool-result observability (input/error stored,
   `SafeExpr` e-notation + thousands separators).
-- Next (Phase A, PLAN-NEXT-PHASE): tools panel + honest service state +
-  stop/abort; then M1 conversation store + Memory screen, M2 knowledge
-  update/OUTDATED, M3 `WebResearchEngine`, M4 `ResearchAgent`, M5 training
-  schema v2 + quality gates.
+- In flight (next revision): M1a conversation store — `messages` table (schema v3),
+  user prompt + final answer persisted per session; restart-proof via disk.
+- Then: Phase A (tools panel + service state + stop/abort), M1b Memory screen,
+  M2 knowledge update/OUTDATED, M3 `WebResearchEngine`, M4 `ResearchAgent`,
+  M5 training schema v2 + quality gates.

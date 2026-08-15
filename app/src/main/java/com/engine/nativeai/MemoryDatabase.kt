@@ -41,7 +41,7 @@ class MemoryDatabase(context: Context) :
     }
 
     companion object {
-        private const val SCHEMA_VERSION = 2
+        private const val SCHEMA_VERSION = 3
         private const val DEFAULT_TOP_K = 3  // spec: Top K = 3 default
         private const val DAY_MS = 86_400_000L
         private const val RECENCY_WINDOW_DAYS = 30.0
@@ -144,6 +144,15 @@ class MemoryDatabase(context: Context) :
                 session_meta TEXT
             )""",
         )
+        db.execSQL(
+            """CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created INTEGER NOT NULL
+            )""",
+        )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -154,6 +163,7 @@ class MemoryDatabase(context: Context) :
         db.execSQL("DROP TABLE IF EXISTS tool_results")
         db.execSQL("DROP TABLE IF EXISTS memory_scores")
         db.execSQL("DROP TABLE IF EXISTS sessions")
+        db.execSQL("DROP TABLE IF EXISTS messages")
         onCreate(db)
     }
 
@@ -234,6 +244,35 @@ class MemoryDatabase(context: Context) :
                 put("session_meta", meta)
             },
         )
+
+    @Synchronized
+    fun recordMessage(sessionId: Long, role: String, content: String): Long =
+        writableDatabase.insertOrThrow(
+            "messages", null,
+            ContentValues().apply {
+                put("session_id", sessionId)
+                put("role", role)
+                put("content", content.take(4000))
+                put("created", System.currentTimeMillis())
+            },
+        )
+
+    @Synchronized
+    fun recentMessages(sessionId: Long, limit: Int = 50): List<Message> =
+        readableDatabase.rawQuery(
+            "SELECT * FROM messages WHERE session_id = ? ORDER BY created DESC LIMIT ?",
+            arrayOf(sessionId.toString(), limit.toString()),
+        ).use { c -> buildList { while (c.moveToNext()) add(c.toMessage()) } }
+
+    @Synchronized
+    fun searchMessages(query: String, limit: Int = 20): List<Message> {
+        if (query.isBlank()) return emptyList()
+        val like = "%${query.trim()}%"
+        return readableDatabase.rawQuery(
+            "SELECT * FROM messages WHERE content LIKE ? ORDER BY created DESC LIMIT ?",
+            arrayOf(like, limit.toString()),
+        ).use { c -> buildList { while (c.moveToNext()) add(c.toMessage()) } }
+    }
 
     @Synchronized
     fun endSession(id: Long) {
@@ -515,6 +554,14 @@ class MemoryDatabase(context: Context) :
         `object` = getString(getColumnIndexOrThrow("object")),
         confidence = getFloat(getColumnIndexOrThrow("confidence")),
         lastVerified = getLong(getColumnIndexOrThrow("last_verified")),
+    )
+
+    private fun Cursor.toMessage() = Message(
+        id = getLong(getColumnIndexOrThrow("id")),
+        sessionId = getLong(getColumnIndexOrThrow("session_id")),
+        role = getString(getColumnIndexOrThrow("role")),
+        content = getString(getColumnIndexOrThrow("content")),
+        created = getLong(getColumnIndexOrThrow("created")),
     )
 
     private fun Cursor.toToolResult() = ToolResult(

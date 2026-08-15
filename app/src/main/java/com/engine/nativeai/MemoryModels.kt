@@ -21,6 +21,14 @@ data class Fact(
     val lastVerified: Long,
 )
 
+data class Message(
+    val id: Long,
+    val sessionId: Long,
+    val role: String,
+    val content: String,
+    val created: Long,
+)
+
 data class ToolResult(
     val id: Long,
     val toolName: String,

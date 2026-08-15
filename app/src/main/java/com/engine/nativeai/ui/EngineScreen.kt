@@ -933,7 +933,9 @@ private fun runAgent(
             preferredId = preferredId,
         )
         val sessionId = try {
-            memory.startSession("agent: ${prompt.take(60)}")
+            val id = memory.startSession("agent: ${prompt.take(60)}")
+            memory.recordMessage(id, "user", prompt)
+            id
         } catch (e: Exception) {
             null // memory failure must never crash the agent
         }
@@ -988,6 +990,13 @@ private fun runAgent(
                         steps.appendLine("[FINAL]")
                         answer.setLength(0)
                         answer.append(ev.answer)
+                        if (sessionId != null) {
+                            try {
+                                memory.recordMessage(sessionId, "agent", ev.answer)
+                            } catch (_: Exception) {
+                                // best-effort conversation persistence
+                            }
+                        }
                         setOutput(steps.toString())
                         setAnswer(answer.toString())
                         setEngineState(EngineUiState.COMPLETED)

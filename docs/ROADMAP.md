@@ -19,7 +19,7 @@ One measured optimization per revision; never fabricate capabilities.
 
 ## Phase 2 — Fast local memory 🟡
 - SQLite memory: FTS5 (Android-10 fallback), BM25 ranking, decay, sessions,
-  experiences/facts, tool-result logging ✅.
+  experiences/facts, tool-result logging, conversations/messages (v3) ✅.
 - Vector retrieval ⬜ — parked until a memory-embedder on-device benchmark
   wins (ADR-007); revisit with TFLite embedder only behind `MemoryProvider`.
 
