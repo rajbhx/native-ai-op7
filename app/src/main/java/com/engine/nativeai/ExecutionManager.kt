@@ -8,7 +8,7 @@ import android.content.Context
  * local short-lived process backend. Termux stays optional — the AI engine
  * works with neither installed, and the UI never pretends otherwise.
  */
-class ExecutionManager(context: Context) {
+class ExecutionManager(private val context: Context) {
 
     private val bridge = AndroidTermuxBridge(context)
     val termux = TermuxBackend(bridge)
