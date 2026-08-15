@@ -79,10 +79,13 @@ esac
 
 TRANSPORT=""
 resolve_transport() {
+    local adb_version=""
     case "$BENCH_TRANSPORT" in
         auto)
-            if command -v adb >/dev/null 2>&1 &&
-                adb version 2>/dev/null | grep -q "Android Debug Bridge"; then
+            if command -v adb >/dev/null 2>&1; then
+                adb_version="$(adb version 2>/dev/null || true)"
+            fi
+            if [ -n "$adb_version" ] && [[ "$adb_version" == *"Android Debug Bridge"* ]]; then
                 TRANSPORT=adb
             elif command -v shizuku >/dev/null 2>&1; then
                 TRANSPORT=shizuku
@@ -115,6 +118,21 @@ remote() {
             ;;
         *) die "transport not resolved (bug)" ;;
     esac
+}
+
+# Retried read: the host-bridge shizuku wrapper can race and drop stdout
+# (exit 0, empty output), so reads retry until they yield output.
+remote_read() {
+    local tries="${1:?missing try count}"
+    shift
+    local out=""
+    for ((i = 0; i < tries; i++)); do
+        out="$(remote "$@" 2>&1 | tr -d '
+')" || true
+        [ -n "$out" ] && break
+        sleep 1
+    done
+    printf '%s' "$out"
 }
 
 resolve_transport
@@ -169,14 +187,14 @@ else
     if [ -n "$ADB_SERIAL" ]; then
         echo "note: --adb serial ignored (shizuku transport is device-local)"
     fi
-    if ! remote getprop ro.serialno 2>/dev/null | tr -d '\r' | grep -q .; then
+    if [ -z "$(remote_read 3 getprop ro.serialno)" ]; then
         die "shizuku not reachable (getprop returned nothing; is Shizuku running?)"
     fi
 fi
 
-DEVICE_SERIAL="$(remote getprop ro.serialno | tr -d '\r' || true)"
-DEVICE_MODEL="$(remote getprop ro.product.model | tr -d '\r' || true)"
-ANDROID_RELEASE="$(remote getprop ro.build.version.release | tr -d '\r' || true)"
+DEVICE_SERIAL="$(remote_read 3 getprop ro.serialno)"
+DEVICE_MODEL="$(remote_read 3 getprop ro.product.model)"
+ANDROID_RELEASE="$(remote_read 3 getprop ro.build.version.release)"
 
 APK_SHA=""
 if [ -n "$APK_PATH" ]; then
@@ -186,7 +204,7 @@ if [ -n "$APK_PATH" ]; then
     remote install -r "$APK_PATH"
 fi
 
-if [ -z "$(remote pm path "$BENCH_PKG" | tr -d '\r')" ]; then
+if [ -z "$(remote_read 3 pm path "$BENCH_PKG")" ]; then
     die "app ${BENCH_PKG} is not installed; install it (--apk with adb transport, or the in-app GGUF downloader)"
 fi
 
@@ -281,11 +299,22 @@ for th in $THREADS; do
                     continue
                 fi
 
-                # 6) copy this cell's structured rows (bench + cell metadata).
-                remote logcat -d -s "$BENCH_TAG:I" 2>/dev/null |
-                    grep "\"run_id\":\"${run_id}\"" |
-                    sed -E 's/^.*NATIVEAI_BENCH: //' |
-                    tr -d '\r' >>"$OUT_FILE"
+                # 6) copy this cell's structured rows (bench + cell metadata);
+                #    retry the dump because the bridge can race and drop it.
+                rows=""
+                for ((i = 0; i < 5; i++)); do
+                    rows="$(remote logcat -d -s "$BENCH_TAG:I" 2>/dev/null |
+                        grep "\"run_id\":\"${run_id}\"" |
+                        sed -E 's/^.*NATIVEAI_BENCH: //' |
+                        tr -d '\r' || true)"
+                    [ -n "$rows" ] && break
+                    sleep 1
+                done
+                if [ -n "$rows" ]; then
+                    printf '%s\n' "$rows" >>"$OUT_FILE"
+                else
+                    echo "  warn: no bench rows captured for ${run_id}"
+                fi
                 append_row "{\"kind\":\"cell\",\"run_id\":\"${run_id}\",\"status\":\"done\",\"launch_state\":\"${launch_state:-unknown}\",\"cold_start_ms\":${total_time:-null},\"pss_kb\":${pss_kb:-null}}"
                 echo "  ok (launch=${launch_state:-unknown}, cold_start_ms=${total_time:-n/a}, pss_kb=${pss_kb:-n/a})"
             done
