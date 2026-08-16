@@ -20,8 +20,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.imePadding
@@ -46,7 +44,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.SnackbarHost
@@ -55,7 +52,6 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -71,8 +67,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.stateDescription
@@ -84,7 +78,6 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.content.ClipData
@@ -139,6 +132,12 @@ import com.engine.nativeai.TermuxStatus
 import com.engine.nativeai.Toolbox
 import com.engine.nativeai.ToolPermission
 import java.io.File
+import com.engine.nativeai.ui.components.HeaderBar
+import com.engine.nativeai.ui.components.ModelChipCard
+import com.engine.nativeai.ui.components.QuickActionBar
+import com.engine.nativeai.ui.components.RoutingModeBar
+import com.engine.nativeai.ui.components.PromptInput
+import com.engine.nativeai.ui.components.AgentControls
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -412,7 +411,9 @@ fun EngineScreen(
 
     // Startup source refresh (roadmap Phase 8): bounded, interruptible,
     // only due sources, only when online. Never blocks the UI.
+    // Defer source update to avoid startup jank — run after first frame
     LaunchedEffect(Unit) {
+        delay(500)
         if (hasNetwork(context)) {
             withContext(Dispatchers.IO) { toolbox.sourceUpdater.updateOnce() }
         }
@@ -521,229 +522,70 @@ fun EngineScreen(
             .imePadding()
             .padding(16.dp),
     ) {
-        // ---------------- HEADER (real engine state) ----------------
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("NEVER SETTLE", color = OpText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text("Native Agentic AI \u00b7 OnePlus 7", color = OpTextSecondary, fontSize = 12.sp)
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.semantics { stateDescription = "Engine state ${headerState.label}" },
-                ) {
-                    Box(
-                        Modifier
-                            .size(8.dp)
-                            .background(
-                                when (headerState) {
-                                    EngineUiState.COMPLETED -> OpSuccess
-                                    EngineUiState.ERROR -> OpRed
-                                    EngineUiState.OFFLINE -> OpTextSecondary
-                                    else -> OpAmber
-                                },
-                                RoundedCornerShape(4.dp),
-                            ),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        if (running) "${headerState.label} \u00b7 ${formatElapsed(elapsed)}" else headerState.label,
-                        color = OpText,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                Text("OP7", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                Text("SD855 \u00b7 6-8 GB", color = OpTextSecondary, fontSize = 9.sp)
-            }
-
-        }
-        Spacer(Modifier.height(10.dp))
-
-        // ---------------- ACTIVE MODEL CHIP (opens settings sheet) ----------------
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(OpCard, RoundedCornerShape(16.dp))
-                .border(BorderStroke(1.dp, OpBorder), RoundedCornerShape(16.dp))
-                .semantics { contentDescription = "Engine settings" }
-                .clickable { showSettingsSheet = true }
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        ) {
-            Text(
-                if (selected == null) "Model \u00b7 none selected" else "Model \u00b7 ${selected.displayName}",
-                color = OpText,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                if (selected == null) "tap to choose" else activeModelSummary(
-                    selected,
-                    selectedLocalFile != null,
-                    providerRegistry.apiKey(selected.provider).isNotBlank(),
-                ),
-                color = OpTextSecondary,
-                fontSize = 11.sp,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text("\u2699", color = OpTextSecondary, fontSize = 14.sp)
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            status,
-            color = OpTextSecondary,
-            fontSize = 12.sp,
-            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                HeaderBar(
+            headerState = headerState,
+            running = running,
+            elapsed = elapsed,
+            formatElapsed = ::formatElapsed,
         )
-        if (importing) {
-            Text(importStatus, color = OpAmber, fontSize = 11.sp)
-            importProgress?.let { p ->
-                Spacer(Modifier.height(4.dp))
-                LinearProgressIndicator(
-                    progress = { p },
-                    color = OpRed,
-                    trackColor = OpBorder,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-        // ---------------- QUICK ACTIONS (always visible) ----------------
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            PillButton("Pick model", Modifier.weight(1f), primary = selected == null) { showPicker = true }
-            PillButton("Import GGUF", Modifier.weight(1f)) {
-                pickLocalLauncher.launch(arrayOf("*/*"))
-            }
-            PillButton("Download", Modifier.weight(1f)) {
+        ModelChipCard(
+            selected = selected,
+            hasModelFile = selectedLocalFile != null,
+            hasApiKey = selected != null && providerRegistry.apiKey(selected.provider).isNotBlank(),
+            status = status,
+            importing = importing,
+            importStatus = importStatus,
+            importProgress = importProgress,
+            summary = if (selected != null) activeModelSummary(selected, selectedLocalFile != null, providerRegistry.apiKey(selected.provider).isNotBlank()) else "",
+            onOpenSettings = { showSettingsSheet = true },
+        )
+        QuickActionBar(
+            hasModel = selected != null,
+            onPickModel = { showPicker = true },
+            onImportGGUF = { pickLocalLauncher.launch(arrayOf("*/*")) },
+            onDownload = {
                 downloadStatus = resumeHint(downloadTarget)
                 showDownloadDialog = true
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        // ---------------- MODE SELECTOR ----------------
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .background(OpBg, RoundedCornerShape(20.dp))
-                .padding(2.dp),
-        ) {
-            modes.forEachIndexed { i, label ->
-                ValuePill(label, selected = i == selectedMode, modifier = Modifier.weight(1f)) {
-                    selectedMode = i
-                    prefs.routingMode = routingModes[i]
-                }
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-
-        // ---------------- PROMPT (primary interaction) ----------------
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = prompt,
-                onValueChange = { vm.setPrompt(it) },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("What do you want me to do?", color = OpTextSecondary) },
-                minLines = 2,
-                maxLines = 6,
-                isError = false,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = {
-                    vm.sendQuick(routingModes[selectedMode], selectedModelId, contextSize, threads, modelsDir)
-                }),
-                trailingIcon = {
-                    if (prompt.isNotEmpty()) {
-                        Text(
-                            "\u00d7",
-                            color = OpTextSecondary,
-                            fontSize = 18.sp,
-                            modifier = Modifier
-                                .semantics { contentDescription = "Clear prompt" }
-                                .clickable { vm.setPrompt("") }
-                                .padding(8.dp),
-                        )
-                    }
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = OpRed,
-                    unfocusedBorderColor = OpBorder,
-                    errorBorderColor = OpRed,
-                    cursorColor = OpRed,
-                ),
-            )
-            Spacer(Modifier.width(8.dp))
-            Button(
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    vm.sendQuick(routingModes[selectedMode], selectedModelId, contextSize, threads, modelsDir)
-                },
-                enabled = prompt.isNotBlank() && !running,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = OpCard,
-                    contentColor = OpText,
-                    disabledContainerColor = OpCard.copy(alpha = 0.4f),
-                    disabledContentColor = OpTextSecondary,
-                ),
-                border = BorderStroke(1.dp, OpBorder),
-                modifier = Modifier
-                    .height(56.dp)
-                    .semantics { contentDescription = "Send prompt" },
-            ) {
-                Text("Send", fontWeight = FontWeight.Bold)
-            }
-        }
-        Text(
-            "\u2191 Send \u00b7 quick completion with selected model \u2014 Agent runs the full tool loop",
-            color = OpTextSecondary,
-            fontSize = 10.sp,
-            modifier = Modifier.padding(top = 4.dp, start = 2.dp),
+            },
         )
-        Spacer(Modifier.height(12.dp))
-
-        // ---------------- PRIMARY ACTIONS ----------------
-        Row(Modifier.fillMaxWidth()) {
-            // One primary action that visibly toggles: Agent (start) <-> Stop.
-            PillButton(
-                if (running) "Stop" else "Agent",
-                Modifier.weight(1f),
-                primary = true,
-                enabled = true,
-                loading = running,
-            ) {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                if (running) {
-                    vm.stop()
-                } else {
-                    scope.launch {
-                        if (selected != null && selected.kind == ModelKind.LOCAL &&
-                            !vm.ensureLocalLoaded(selectedLocalFile, contextSize, threads, modelsDir)
-                        ) return@launch
-                        vm.runAgent(
-                            context = context,
-                            registry = registry,
-                            prefs = prefs,
-                            toolbox = toolbox,
-                            prompt = prompt,
-                            mode = routingModes[selectedMode],
-                            modeLabel = modes[selectedMode],
-                            preferredId = selectedModelId,
-                        )
-                    }
+        RoutingModeBar(
+            modes = modes,
+            selectedIndex = selectedMode,
+            onModeSelected = { i ->
+                selectedMode = i
+                prefs.routingMode = routingModes[i]
+            },
+        )
+        PromptInput(
+            prompt = prompt,
+            onPromptChange = { vm.setPrompt(it) },
+            onSend = { vm.sendQuick(routingModes[selectedMode], selectedModelId, contextSize, threads, modelsDir) },
+            enabled = !running,
+        )
+        AgentControls(
+            running = running,
+            hasContent = prompt.isNotBlank() || answer.isNotBlank() || output.isNotBlank(),
+            onAgent = {
+                scope.launch {
+                    if (selected != null && selected.kind == ModelKind.LOCAL &&
+                        !vm.ensureLocalLoaded(selectedLocalFile, contextSize, threads, modelsDir)
+                    ) return@launch
+                    vm.runAgent(
+                        context = context,
+                        registry = registry,
+                        prefs = prefs,
+                        toolbox = toolbox,
+                        prompt = prompt,
+                        mode = routingModes[selectedMode],
+                        modeLabel = modes[selectedMode],
+                        preferredId = selectedModelId,
+                    )
                 }
-            }
-            Spacer(Modifier.width(8.dp))
-            PillButton(
-                "Clear",
-                Modifier.weight(1f),
-                enabled = !running && (prompt.isNotBlank() || answer.isNotBlank() || output.isNotBlank()),
-            ) {
-                vm.clearRun()
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-
-        // ---------------- LOG ZONE: AGENT TRACE / HISTORY / ERRORS ----------------
+            },
+            onStop = { vm.stop() },
+            onClear = { vm.clearRun() },
+        )
+// ---------------- LOG ZONE: AGENT TRACE / HISTORY / ERRORS ----------------
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth(),
@@ -1740,7 +1582,7 @@ fun EngineScreen(
 
 /** One storage row in ENGINE SETTINGS: current location + preset/pick actions. */
 @Composable
-private fun StorageRow(
+internal fun StorageRow(
     title: String,
     subtitle: String,
     label: String,
@@ -2078,7 +1920,7 @@ private fun StepRow(text: String, color: Color) {
 
 
 @Composable
-private fun PillButton(
+internal fun PillButton(
     text: String,
     modifier: Modifier = Modifier,
     primary: Boolean = false,
@@ -2114,7 +1956,7 @@ private fun PillButton(
 }
 
 @Composable
-private fun HistorySessionCard(session: ChatSession, onReuse: (String) -> Unit) {
+internal fun HistorySessionCard(session: ChatSession, onReuse: (String) -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -2158,7 +2000,7 @@ private fun formatHistoryTime(ms: Long): String =
         .format(java.util.Date(ms))
 
 @Composable
-private fun ValuePill(
+internal fun ValuePill(
     text: String,
     selected: Boolean,
     modifier: Modifier = Modifier,
@@ -2192,7 +2034,7 @@ private fun availableRamBytes(context: Context): Long {
     return info.availMem
 }
 
-private fun formatElapsed(ms: Long): String =
+internal fun formatElapsed(ms: Long): String =
     String.format(Locale.US, "%d:%02d", ms / 60000, (ms % 60000) / 1000)
 
 private fun redactSensitive(input: String): String =
@@ -2221,7 +2063,7 @@ private fun modeIndexFor(mode: RoutingMode): Int = when (mode) {
     RoutingMode.OFFLINE_ONLY -> 3 // OFFLINE
 }
 
-private fun activeModelSummary(d: ModelDescriptor, hasModelFile: Boolean, hasKey: Boolean): String {
+internal fun activeModelSummary(d: ModelDescriptor, hasModelFile: Boolean, hasKey: Boolean): String {
     val tier = when (d.costTier) {
         ModelCostTier.FREE -> "FREE"
         ModelCostTier.PAID -> "PAID"
@@ -2258,7 +2100,7 @@ private fun ensureRemoteProvider(
 }
 
 @Composable
-private fun ModelCard(
+internal fun ModelCard(
     d: ModelDescriptor,
     connectionText: String,
     connectionColor: Color,
