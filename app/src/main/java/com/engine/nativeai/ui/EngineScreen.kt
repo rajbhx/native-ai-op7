@@ -82,6 +82,8 @@ import com.engine.nativeai.AgentEvent
 import com.engine.nativeai.AgentState
 import com.engine.nativeai.AgentTask
 import com.engine.nativeai.CalculatorTool
+import com.engine.nativeai.CoreErrors
+import com.engine.nativeai.ErrorEntry
 import com.engine.nativeai.ChatHistory
 import com.engine.nativeai.ChatSession
 import com.engine.nativeai.EngineForegroundService
@@ -237,6 +239,17 @@ fun EngineScreen(
         scope.launch {
             historySessions = chatHistory.recent(limit = 8, messagesPerSession = 10)
         }
+    }
+
+    // Core error log (ERRORS tab): every recorded failure is visible here.
+    var errorsExpanded by remember { mutableStateOf(false) }
+    var errorEntries by remember { mutableStateOf(CoreErrors.log.all()) }
+    var errorDetailId by remember { mutableStateOf<Long?>(null) }
+
+    fun showErrors() {
+        errorsExpanded = true
+        historyExpanded = false
+        errorEntries = CoreErrors.log.all()
     }
     var termuxStatus by remember { mutableStateOf(executionManager.status()) }
     var termuxReason by remember { mutableStateOf(executionManager.statusReason()) }
@@ -418,6 +431,7 @@ fun EngineScreen(
             loadedPath = null
             engineState = EngineUiState.ERROR
             status = "init failed: ${e.message}"
+            CoreErrors.log.record("local", "local model init failed: ${e.message}", e)
             false
         }
     }
@@ -488,6 +502,7 @@ fun EngineScreen(
                 status = "generation stopped"
                 engineState = EngineUiState.READY
             } catch (e: Exception) {
+                CoreErrors.log.record("generate", "generate failed: ${e.message}", e)
                 status = "generate failed: ${e.message}"
                 engineState = EngineUiState.ERROR
             } finally {
@@ -728,18 +743,21 @@ fun EngineScreen(
         }
         Spacer(Modifier.height(12.dp))
 
-        // ---------------- LOG ZONE: AGENT TRACE / HISTORY ----------------
+        // ---------------- LOG ZONE: AGENT TRACE / HISTORY / ERRORS ----------------
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(
                 "AGENT TRACE",
-                color = if (!historyExpanded) OpText else OpTextSecondary,
+                color = if (!historyExpanded && !errorsExpanded) OpText else OpTextSecondary,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .clickable { historyExpanded = false }
+                    .clickable {
+                        historyExpanded = false
+                        errorsExpanded = false
+                    }
                     .padding(end = 12.dp),
             )
             Text(
@@ -750,22 +768,45 @@ fun EngineScreen(
                 modifier = Modifier
                     .clickable {
                         historyExpanded = true
+                        errorsExpanded = false
                         if (!historyLoaded) loadHistory()
                     }
                     .padding(end = 12.dp),
             )
+            val errorCount = CoreErrors.log.count()
+            Text(
+                if (errorCount > 0) "ERRORS \u00b7 $errorCount" else "ERRORS",
+                color = if (errorsExpanded) OpText else OpTextSecondary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clickable { showErrors() }
+                    .padding(end = 12.dp),
+            )
             Spacer(Modifier.weight(1f))
             Text(
-                if (!historyExpanded && traceExpanded) "\u25be" else "\u25b8",
+                if (!historyExpanded && !errorsExpanded && traceExpanded) "\u25be" else "\u25b8",
                 color = OpTextSecondary,
                 fontSize = 14.sp,
                 modifier = Modifier.clickable {
-                    if (!historyExpanded) traceExpanded = !traceExpanded
+                    if (!historyExpanded && !errorsExpanded) traceExpanded = !traceExpanded
                 },
             )
         }
         Spacer(Modifier.height(8.dp))
-        if (historyExpanded) {
+        if (errorsExpanded) {
+            ErrorLogView(
+                entries = errorEntries,
+                detailId = errorDetailId,
+                onToggleDetail = { errorDetailId = if (errorDetailId == it) null else it },
+                onClear = {
+                    CoreErrors.log.clear()
+                    errorEntries = emptyList()
+                    errorDetailId = null
+                },
+                onRefresh = { errorEntries = CoreErrors.log.all() },
+            )
+        } else if (historyExpanded) {
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -1329,10 +1370,18 @@ fun EngineScreen(
         DiagnosticsDialog(
             snapshot = diagnosticsSnapshot,
             serviceState = serviceState.name,
-            runtimeLines = listOf(
-                "MNN    ${MnnBackend().status()}",
-                "VECT   ${if (USearchVectorIndex.selfTest()) "USearch ready (self-test ok)" else "USearch unavailable (self-test failed)"}",
-            ),
+            runtimeLines = buildList {
+                add(runCatching { "MNN    ${MnnBackend().status()}" }.getOrElse { e ->
+                    CoreErrors.log.record("diagnostics", "MNN probe failed: ${e.message}", e)
+                    "MNN    error: ${e.message}"
+                })
+                add(runCatching {
+                    "VECT   ${if (USearchVectorIndex.selfTest()) "USearch ready (self-test ok)" else "USearch unavailable (self-test failed)"}"
+                }.getOrElse { e ->
+                    CoreErrors.log.record("diagnostics", "USearch probe failed: ${e.message}", e)
+                    "VECT   error: ${e.message}"
+                })
+            },
             onClear = {
                 runtimeMetrics.reset()
                 diagnosticsSnapshot = null
@@ -1626,6 +1675,7 @@ private fun runAgent(
             setStatus("agent stopped")
             setEngineState(EngineUiState.READY)
         } catch (e: Exception) {
+            CoreErrors.log.record("agent", "run failed: ${e.message}", e)
             setStatus("agent failed: ${e.message}")
             setEngineState(EngineUiState.ERROR)
         } finally {
@@ -2175,3 +2225,111 @@ private val QUICK_MODELS = listOf(
         "https://modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/master/qwen2.5-1.5b-instruct-q4_k_m.gguf",
     ),
 )
+
+@Composable
+private fun ErrorLogView(
+    entries: List<ErrorEntry>,
+    detailId: Long?,
+    onToggleDetail: (Long) -> Unit,
+    onClear: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .weight(1f)
+            .background(OpCard, RoundedCornerShape(12.dp)),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "${entries.size} error${if (entries.size == 1) "" else "s"} \u00b7 last failures visible here",
+                color = OpTextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "CLEAR",
+                color = OpTextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(enabled = entries.isNotEmpty()) { onClear() }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "REFRESH",
+                color = OpTextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { onRefresh() }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+        if (entries.isEmpty()) {
+            Text(
+                "No errors recorded.",
+                color = OpTextSecondary,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(12.dp),
+            )
+        } else {
+            LazyColumn(
+                Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(entries) { entry ->
+                    val expanded = detailId == entry.id
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(OpBg, RoundedCornerShape(10.dp))
+                            .border(1.dp, OpBorder, RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onToggleDetail(entry.id) }
+                            .padding(10.dp),
+                    ) {
+                        Text(
+                            "${formatHistoryTime(entry.atMs)} \u00b7 ${entry.source}${if (expanded) " \u25be" else " \u25b8"}",
+                            color = OpTextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            entry.message,
+                            color = OpText,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                        if (expanded && !entry.detail.isNullOrBlank()) {
+                            Text(
+                                entry.detail,
+                                color = OpTextSecondary,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(OpBg, RoundedCornerShape(6.dp))
+                                    .padding(6.dp)
+                                    .padding(top = 6.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

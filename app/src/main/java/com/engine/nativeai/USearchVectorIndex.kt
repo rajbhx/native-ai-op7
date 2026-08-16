@@ -65,7 +65,8 @@ class USearchVectorIndex(
 
     companion object {
         /** On-device smoke check (used by diagnostics, not as a fake capability). */
-        fun selfTest(): Boolean = LIB_LOADED && nativeSelfTest()
+        fun selfTest(): Boolean =
+            runCatching { LIB_LOADED && nativeSelfTest() }.getOrDefault(false)
 
         private external fun nativeSelfTest(): Boolean
 

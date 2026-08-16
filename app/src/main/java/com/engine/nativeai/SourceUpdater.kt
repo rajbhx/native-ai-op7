@@ -85,8 +85,13 @@ class SourceUpdater(
             }
             registry.touchRead(s.id)
             spent
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Interrupted refresh (e.g. screen navigation) is not a source
+            // error: leave the row clean and let the next cycle retry.
+            throw e
         } catch (e: Exception) {
             registry.markError(s.id, e.message ?: "update failed")
+            CoreErrors.log.record("source-update", "refresh failed: ${e.message}", e)
             -1L
         }
     }
