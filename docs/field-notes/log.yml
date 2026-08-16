@@ -255,3 +255,18 @@ sections:
         cause: "roadmap listed vectors but no runtime or gate existed"
         solution: "vendored USearch v2.11.3 headers + vector-lib + USearchVectorIndex (bounded/persisted) + EmbeddingProvider seam; hybrid BM25+HNSW RRF dormant until the benchmark gate passes"
         tags: [usearch, vector, hybrid, gating]
+      - id: A51
+        problem: "ci/sources-fmhy-site was a wrong push: golden wave (VM refactor, approvals, skills, integrity, dataset export) unrelated to FMHY"
+        cause: "previous run conflated a large engine/UX refactor with the small FMHY source change; ~90% of the diff was out of scope"
+        solution: "delete local + remote branch (merge-base == main HEAD, nothing merged); main stays the source of truth; one branch = one scoped feature"
+        tags: [git, branch-hygiene, scope, workflow]
+      - id: A52
+        problem: "GitHub banner: main branch isn't protected; force-push/delete and unchecked merges possible"
+        cause: "no branch-protection rule on the default branch (API 404 Branch not protected)"
+        solution: "classic protection on main: required status check 'build', no force pushes, no deletions, enforce_admins false; direct pushes stay allowed"
+        tags: [github, branch-protection, ci, safety]
+      - id: A53
+        problem: "main's seed catalog still had LiteRT/Termux/llama.cpp/uBlock/MemPalace and no FMHY"
+        cause: "SITE-type FMHY only existed on the deleted branch; main has no SourceType.SITE"
+        solution: "sources.json -> FMHY (GITHUB_REPO fmhy/FMHY) + playbook only; ROADMAP S4 updated; CI green on main (fd3e899)"
+        tags: [sources, catalog, fmhy, assets]
