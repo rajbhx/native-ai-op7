@@ -23,6 +23,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -45,7 +47,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -65,6 +72,10 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -76,9 +87,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.engine.nativeai.AgentEvent
+import com.engine.nativeai.ApprovalDecision
+import com.engine.nativeai.EngineUiState
+import com.engine.nativeai.EngineViewModel
+import com.engine.nativeai.ToolApprovalRequest
 import com.engine.nativeai.AgentState
 import com.engine.nativeai.AgentTask
 import com.engine.nativeai.CalculatorTool
@@ -101,9 +119,15 @@ import com.engine.nativeai.LocalModelImporter
 import com.engine.nativeai.LocalModelLibrary
 import com.engine.nativeai.LocalModelProvider
 import com.engine.nativeai.MemoryDatabase
+import com.engine.nativeai.GgufMetaCache
 import com.engine.nativeai.MemoryPlanner
+import com.engine.nativeai.ModelBenchmark
+import com.engine.nativeai.ModelIntegrity
+import com.engine.nativeai.ModelManifest
 import com.engine.nativeai.ModelDownloader
 import com.engine.nativeai.DownloadResult
+import com.engine.nativeai.SelfLearningPipeline
+import com.engine.nativeai.Skill
 import com.engine.nativeai.MemorySearchTool
 import com.engine.nativeai.ModelCatalog
 import com.engine.nativeai.ModelAvailability
@@ -128,7 +152,6 @@ import com.engine.nativeai.RemoteProviderBootstrap
 import com.engine.nativeai.NativeEngine
 import com.engine.nativeai.RoutingMode
 import com.engine.nativeai.RuntimeDiagnostics
-import com.engine.nativeai.RuntimeMetrics
 import com.engine.nativeai.DiagnosticsSnapshot
 import com.engine.nativeai.SystemInfoTool
 import com.engine.nativeai.TaskType
@@ -140,8 +163,8 @@ import com.engine.nativeai.ToolPermission
 import com.engine.nativeai.ToolRegistry
 import com.engine.nativeai.WebSearchTool
 import java.io.File
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -167,29 +190,29 @@ fun EngineScreen(
     val downloadTarget = remember { File(context.filesDir, "models/model.gguf") }
     val modelsDir = remember { File(context.filesDir, "models") }
     var localModels by remember { mutableStateOf(localLibrary.scan()) }
-    val runtimeMetrics = remember { RuntimeMetrics() }
+
+    val vm: EngineViewModel = viewModel()
+    // Metrics live in the VM so accumulated measurements survive rotation.
+    val runtimeMetrics = vm.runtimeMetrics
     val diagnostics = remember { RuntimeDiagnostics(runtimeMetrics, engine) }
     val jankMonitor = remember { FrameJankMonitor(runtimeMetrics) }
-
-    var loaded by remember { mutableStateOf(false) }
-    var loadedPath by remember { mutableStateOf<String?>(null) }
-    var status by remember {
-        mutableStateOf(
-            if (localModels.isEmpty()) {
-                "No GGUF model found \u2014 use Download GGUF or \u201c+ Pick GGUF from storage\u201d"
-            } else {
-                "Local library ready: ${localModels.joinToString { it.file.name }}"
-            },
-        )
-    }
-    var prompt by remember { mutableStateOf(initialPrompt ?: "") }
-    var output by remember { mutableStateOf("") }
-    var answer by remember { mutableStateOf("") }
-    var running by remember { mutableStateOf(false) }
+    val loaded by vm.loaded.collectAsState()
+    val status by vm.status.collectAsState()
+    val prompt by vm.prompt.collectAsState()
+    val output by vm.output.collectAsState()
+    val answer by vm.answer.collectAsState()
+    val running by vm.running.collectAsState()
+    val engineState by vm.engineState.collectAsState()
+    val elapsed by vm.elapsedMs.collectAsState()
+    val lastRoute by vm.lastRoute.collectAsState()
+    val pendingApproval by vm.pendingApproval.collectAsState()
+    val lastSources by vm.lastSources.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val haptic = LocalHapticFeedback.current
     var traceExpanded by remember { mutableStateOf(true) }
     val serviceState by EngineForegroundService.state.collectAsState()
     val serviceRunning = serviceState != EngineServiceState.STOPPED
-    var engineState by remember { mutableStateOf(EngineUiState.READY) }
+
     var selectedMode by remember { mutableStateOf(modeIndexFor(prefs.routingMode)) }
     var selectedModelId by remember {
         val persisted = prefs.lastSelectedModelId
@@ -200,8 +223,8 @@ fun EngineScreen(
         )
     }
     var favorites by remember { mutableStateOf(prefs.favorites()) }
+    var toolAlwaysAllow by remember { mutableStateOf(prefs.toolAlwaysAllow) }
     var showSettingsSheet by remember { mutableStateOf(false) }
-    var runJob by remember { mutableStateOf<Job?>(null) }
 
     // Mirror agent activity into the service lifecycle (Phase A4): the
     // service applies its own transition rules, the UI only reports events.
@@ -225,6 +248,32 @@ fun EngineScreen(
     // One construction path for tools + sources (core-hardening C1): the
     // sheet inventory, the agent and the startup refresh share this instance.
     val toolbox = remember { Toolbox(context, engine, registry, prefs, executionManager) }
+
+    // Attach once per ViewModel lifetime: the VM owns run state so rotation
+    // never loses prompt/output/trace/state, and runs survive recreation.
+    LaunchedEffect(Unit) {
+        vm.attach(engine, context, localLibrary, registry, prefs, toolbox)
+        if (vm.prompt.value.isBlank() && !initialPrompt.isNullOrBlank()) vm.setPrompt(initialPrompt)
+        if (vm.status.value.isBlank()) {
+            vm.setStatus(
+                if (localModels.isEmpty()) {
+                    "No GGUF model found \u2014 use Download GGUF or \u201c+ Pick GGUF from storage\u201d"
+                } else {
+                    "Local library ready: ${localModels.joinToString { it.file.name }}"
+                },
+            )
+        }
+    }
+    LaunchedEffect(Unit) {
+        vm.events.collect { ev ->
+            val result = snackbarHostState.showSnackbar(
+                message = ev.text,
+                actionLabel = ev.actionLabel,
+                withDismissAction = ev.actionLabel == null,
+            )
+            if (result == SnackbarResult.ActionPerformed) ev.action?.invoke()
+        }
+    }
 
     // Chat history (Phase 3 gap): runs were persisted but never visible.
     var historyExpanded by remember { mutableStateOf(false) }
@@ -264,6 +313,20 @@ fun EngineScreen(
     var importStatus by remember { mutableStateOf("") }
     var showDiagnostics by remember { mutableStateOf(false) }
     var diagnosticsSnapshot by remember { mutableStateOf<DiagnosticsSnapshot?>(null) }
+    var benchmarkLines by remember { mutableStateOf<List<String>>(emptyList()) }
+    var benchmarking by remember { mutableStateOf(false) }
+    var deleteTarget by remember { mutableStateOf<ModelDescriptor?>(null) }
+    // Phase 10: skill management (create/update/delete user skills).
+    var skillEditor by remember { mutableStateOf<Skill?>(null) }
+    var skillToDelete by remember { mutableStateOf<Skill?>(null) }
+    var skillsVersion by remember { mutableStateOf(0) }
+    // Phase 4: verified dataset export + LoRA eligibility (Diagnostics).
+    var trainingExportLines by remember { mutableStateOf<List<String>>(emptyList()) }
+    var exportingTraining by remember { mutableStateOf(false) }
+    val trainingPipeline = remember {
+        SelfLearningPipeline(toolbox.memory, File(context.filesDir, "training"))
+    }
+    var firstRunDismissed by remember { mutableStateOf(prefs.firstRunDismissed) }
     val importer = remember { LocalModelImporter(modelsDir) }
     val pickLocalLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -283,6 +346,13 @@ fun EngineScreen(
                 importing = false
                 when (result) {
                     is ImportResult.Success -> {
+                        val importedSha = ModelIntegrity.sha256(result.file) ?: ""
+                        ModelManifest.record(
+                            modelsDir,
+                            result.file.name,
+                            importedSha,
+                            result.file.length(),
+                        )
                         localModels = localLibrary.scan()
                         localLibrary.syncInto(
                             registry,
@@ -293,11 +363,12 @@ fun EngineScreen(
                         val entry = localModels.firstOrNull { it.file == result.file }
                         selectedModelId = entry?.id ?: LocalModelProvider.LOCAL_MODEL_ID
                         prefs.lastSelectedModelId = selectedModelId
-                        status = "Imported ${result.file.name} \u2014 tap Load Model"
+                        vm.setStatus("Imported ${result.file.name} \u2014 tap Load Model")
+                        vm.notify("Imported ${result.file.name}")
                     }
                     is ImportResult.Error -> {
                         importStatus = "failed: ${result.message}"
-                        status = "import failed: ${result.message}"
+                        vm.setStatus("import failed: ${result.message}")
                     }
                 }
             }
@@ -329,7 +400,7 @@ fun EngineScreen(
             // router (and the persisted selection) can use them.
             RemoteProviderBootstrap.registerRemoteProviders(registry, providerRegistry)
             if (r.error != null) {
-                status = "catalog: cached seeds (${r.error})"
+                vm.setStatus("catalog: cached seeds (${r.error})")
             }
         }
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -379,164 +450,22 @@ fun EngineScreen(
     val (connText, connColor) = when {
         selected == null -> "select a model" to OpAmber
         selected.kind == ModelKind.LOCAL ->
-            if (selectedLocalFile != null) "Available" to Color(0xFF2ECC71)
-            else "No model file" to OpRed
+            if (selectedLocalFile != null) "Available" to OpStatusSuccess
+            else "No model file" to OpStatusWarn
         else ->
-            if (providerRegistry.apiKey(selected.provider).isNotBlank()) "Connected" to Color(0xFF2ECC71)
-            else "Free \u00b7 anonymous (rate-limited)" to Color(0xFFF5A623)
+            if (providerRegistry.apiKey(selected.provider).isNotBlank()) "Connected" to OpStatusSuccess
+            else "Free \u00b7 anonymous (rate-limited)" to OpStatusWarn
     }
     // Real engine state, driven only by actual operations (never faked).
     val headerState = if (routingModes[selectedMode] == RoutingMode.OFFLINE_ONLY &&
         engineState == EngineUiState.READY
     ) EngineUiState.OFFLINE else engineState
 
-    // Loads the local GGUF on demand so Agent/Generate work with one tap.
-    suspend fun ensureLocalLoaded(file: File? = selectedLocalFile): Boolean {
-        val target = file
-        if (target == null) {
-            engineState = EngineUiState.ERROR
-            status = "Model not found:\n${modelsDir.absolutePath}\nPick or download a GGUF, then retry."
-            return false
-        }
-        if (loaded && loadedPath == target.absolutePath) return true
-        // Dynamic 1.5 GB budget: pre-flight before loading (never crash).
-        val plan = MemoryPlanner.plan(target.length(), contextSize, availableRamBytes(context))
-        if (!plan.withinBudget) {
-            engineState = EngineUiState.ERROR
-            status = "MODEL MAY EXCEED AVAILABLE MEMORY \u2014 estimated " +
-                "${plan.totalMb.toInt()} MB vs cap ${plan.availableCapMb.toInt()} MB; " +
-                "drop context to ${plan.maxSafeNctx} or use a smaller GGUF"
-            return false
-        }
-        engineState = EngineUiState.LOADING
-        status = "loading model (threads=$threads)\u2026"
-        return try {
-            if (loaded) engine.close()
-            val t0 = System.currentTimeMillis()
-            engine.init(
-                EngineConfig(
-                    target.absolutePath,
-                    threads = threads,
-                    contextSize = contextSize,
-                    nativeLibDir = context.applicationInfo.nativeLibraryDir,
-                ),
-            )
-            runtimeMetrics.recordModelLoad(System.currentTimeMillis() - t0)
-            loaded = true
-            loadedPath = target.absolutePath
-            engineState = EngineUiState.COMPLETED
-            status = "Model loaded: ${target.name} (threads=$threads)"
-            true
-        } catch (e: Exception) {
-            loadedPath = null
-            engineState = EngineUiState.ERROR
-            status = "init failed: ${e.message}"
-            CoreErrors.log.record("local", "local model init failed: ${e.message}", e)
-            false
-        }
-    }
-
-    // Quick completion with the selected model (one tap / IME Send).
-    fun sendQuick() {
-        if (prompt.isBlank() || running) return
-        runJob = scope.launch {
-            try {
-                val effectiveMode = if (prefs.privacyMode == PrivacyMode.LOCAL_ONLY) {
-                    RoutingMode.OFFLINE_ONLY
-                } else {
-                    routingModes[selectedMode]
-                }
-                val descriptor = ModelRouter(effectiveMode).route(
-                    AgentTask(
-                        prompt = prompt,
-                        taskType = TaskType.CHAT,
-                        contextLength = contextSize,
-                        networkAvailable = hasNetwork(context),
-                    ),
-                    registry,
-                    preferredId = selectedModelId,
-                )
-                if (descriptor == null) {
-                    status = "no model available for quick completion"
-                    engineState = EngineUiState.ERROR
-                    return@launch
-                }
-                if (descriptor.kind == ModelKind.LOCAL &&
-                    !ensureLocalLoaded(localLibrary.resolve(descriptor.id))
-                ) {
-                    return@launch
-                }
-                val provider = registry.providerFor(descriptor)
-                if (provider == null) {
-                    status = "provider not ready: ${descriptor.id}"
-                    engineState = EngineUiState.ERROR
-                    return@launch
-                }
-                running = true
-                output = ""
-                answer = ""
-                engineState = EngineUiState.THINKING
-                status = "generating via ${descriptor.id}\u2026"
-                val sb = StringBuilder()
-                provider.stream(
-                    ModelRequest(
-                        prompt = prompt,
-                        system = prefs.systemPromptOverride ?: "",
-                        maxTokens = 64,
-                    ),
-                ).collect { ev ->
-                    when (ev) {
-                        is ModelStreamEvent.Token -> {
-                            sb.append(ev.text)
-                            answer = sb.toString()
-                        }
-                        is ModelStreamEvent.Reasoning -> Unit
-                        is ModelStreamEvent.Done -> Unit
-                        is ModelStreamEvent.Error ->
-                            throw IllegalStateException(ev.message)
-                    }
-                }
-                status = "generation complete (${sb.length} chars)"
-                engineState = EngineUiState.COMPLETED
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                status = "generation stopped"
-                engineState = EngineUiState.READY
-            } catch (e: Exception) {
-                CoreErrors.log.record("generate", "generate failed: ${e.message}", e)
-                status = "generate failed: ${e.message}"
-                engineState = EngineUiState.ERROR
-            } finally {
-                running = false
-                runJob = null
-            }
-        }
-    }
-
-    // Stop aborts the running agent/generation and records it in the trace.
-    fun stopRun() {
-        if (runJob == null) {
-            engine.cancel()
-            return
-        }
-        // Native llama.cpp decode is a blocking call that coroutine
-        // cancellation alone cannot interrupt. Request native cancellation
-        // first, then cancel the job. Keep `running` true until the job
-        // unwinds in `finally` so a new run cannot start while the native
-        // engine is still decoding the previous turn (prevents overlapping
-        // generations on one context, which corrupted the graph and crashed
-        // in ggml_compute_forward_rope).
-        engine.cancel()
-        runJob?.cancel()
-        status = "agent stopped"
-        if (output.isNotBlank()) {
-            output = output.trimEnd('\n') + "\n[STOPPED]"
-        }
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(OpBg)
+            .imePadding()
             .padding(16.dp),
     ) {
         // ---------------- HEADER (real engine state) ----------------
@@ -546,7 +475,10 @@ fun EngineScreen(
                 Text("Native Agentic AI \u00b7 OnePlus 7", color = OpTextSecondary, fontSize = 12.sp)
             }
             Column(horizontalAlignment = Alignment.End) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.semantics { stateDescription = "Engine state ${headerState.label}" },
+                ) {
                     Box(
                         Modifier
                             .size(8.dp)
@@ -561,7 +493,12 @@ fun EngineScreen(
                             ),
                     )
                     Spacer(Modifier.width(6.dp))
-                    Text(headerState.label, color = OpText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (running) "${headerState.label} \u00b7 ${formatElapsed(elapsed)}" else headerState.label,
+                        color = OpText,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
                 Text("OP7", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Text("SD855 \u00b7 8 GB", color = OpTextSecondary, fontSize = 9.sp)
@@ -606,6 +543,7 @@ fun EngineScreen(
                 .fillMaxWidth()
                 .background(OpCard, RoundedCornerShape(16.dp))
                 .border(BorderStroke(1.dp, OpBorder), RoundedCornerShape(16.dp))
+                .semantics { contentDescription = "Engine settings" }
                 .clickable { showSettingsSheet = true }
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
@@ -629,11 +567,52 @@ fun EngineScreen(
             Text("\u2699", color = OpTextSecondary, fontSize = 14.sp)
         }
         Spacer(Modifier.height(8.dp))
-        Text(status, color = OpTextSecondary, fontSize = 12.sp)
+        Text(
+            status,
+            color = OpTextSecondary,
+            fontSize = 12.sp,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
         if (importing) {
             Text(importStatus, color = OpAmber, fontSize = 11.sp)
         }
-        Spacer(Modifier.height(12.dp))
+        if (models.isEmpty() && localModels.isEmpty() && !firstRunDismissed) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(OpCard, RoundedCornerShape(12.dp))
+                    .border(BorderStroke(1.dp, OpBorder), RoundedCornerShape(12.dp))
+                    .padding(10.dp),
+            ) {
+                Text("FIRST RUN", color = OpText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "1. Pick a model \u00b7 2. Download or import a GGUF \u00b7 3. Add sources",
+                    color = OpTextSecondary,
+                    fontSize = 11.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    PillButton("Pick a model", Modifier.weight(1f), primary = true) { showPicker = true }
+                    Spacer(Modifier.width(8.dp))
+                    PillButton("Download GGUF", Modifier.weight(1f)) {
+                        downloadStatus = resumeHint(downloadTarget)
+                        showDownloadDialog = true
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    PillButton("Add sources", Modifier.weight(1f)) { onOpenSources() }
+                    Spacer(Modifier.width(8.dp))
+                    PillButton("Skip", Modifier.weight(1f)) {
+                        firstRunDismissed = true
+                        prefs.firstRunDismissed = true
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        } else {
+            Spacer(Modifier.height(12.dp))
+        }
 
         // ---------------- PROMPT (primary interaction) ----------------
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -646,7 +625,9 @@ fun EngineScreen(
                 maxLines = 6,
                 isError = false,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { sendQuick() }),
+                keyboardActions = KeyboardActions(onSend = {
+                    vm.sendQuick(routingModes[selectedMode], selectedModelId, contextSize, threads, modelsDir)
+                }),
                 trailingIcon = {
                     if (prompt.isNotEmpty()) {
                         Text(
@@ -654,7 +635,8 @@ fun EngineScreen(
                             color = OpTextSecondary,
                             fontSize = 18.sp,
                             modifier = Modifier
-                                .clickable { prompt = "" }
+                                .semantics { contentDescription = "Clear prompt" }
+                                .clickable { vm.setPrompt("") }
                                 .padding(8.dp),
                         )
                     }
@@ -668,7 +650,10 @@ fun EngineScreen(
             )
             Spacer(Modifier.width(8.dp))
             Button(
-                onClick = { sendQuick() },
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    vm.sendQuick(routingModes[selectedMode], selectedModelId, contextSize, threads, modelsDir)
+                },
                 enabled = prompt.isNotBlank() && !running,
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -695,50 +680,42 @@ fun EngineScreen(
 
         // ---------------- PRIMARY ACTIONS ----------------
         Row(Modifier.fillMaxWidth()) {
+            // One primary action that visibly toggles: Agent (start) <-> Stop.
             PillButton(
-                if (running) "Agent \u00b7 RUNNING" else "Agent",
+                if (running) "Stop" else "Agent",
                 Modifier.weight(1f),
                 primary = true,
-                enabled = !running,
+                enabled = true,
+                loading = running,
             ) {
-                scope.launch {
-                    if (selected != null && selected.kind == ModelKind.LOCAL && !ensureLocalLoaded()) return@launch
-                    runAgent(
-                        context = context,
-                        registry = registry,
-                        prefs = prefs,
-                        toolbox = toolbox,
-                        prompt = prompt,
-                        mode = routingModes[selectedMode],
-                        modeLabel = modes[selectedMode],
-                        preferredId = selectedModelId,
-                        loaded = loaded,
-                        metrics = runtimeMetrics,
-                        setRunning = { running = it },
-                        setStatus = { status = it },
-                        setOutput = { output = it },
-                        setAnswer = { answer = it },
-                        setRunJob = { runJob = it },
-                        setEngineState = { engineState = it },
-                        scope = scope,
-                    )
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                if (running) {
+                    vm.stop()
+                } else {
+                    scope.launch {
+                        if (selected != null && selected.kind == ModelKind.LOCAL &&
+                            !vm.ensureLocalLoaded(selectedLocalFile, contextSize, threads, modelsDir)
+                        ) return@launch
+                        vm.runAgent(
+                            context = context,
+                            registry = registry,
+                            prefs = prefs,
+                            toolbox = toolbox,
+                            prompt = prompt,
+                            mode = routingModes[selectedMode],
+                            modeLabel = modes[selectedMode],
+                            preferredId = selectedModelId,
+                        )
+                    }
                 }
             }
             Spacer(Modifier.width(8.dp))
-            if (running) {
-                PillButton("Stop", Modifier.weight(1f), enabled = true) {
-                    stopRun()
-                }
-            } else {
-                PillButton(
-                    "Clear",
-                    Modifier.weight(1f),
-                    enabled = prompt.isNotBlank() || answer.isNotBlank() || output.isNotBlank(),
-                ) {
-                    prompt = ""
-                    answer = ""
-                    output = ""
-                }
+            PillButton(
+                "Clear",
+                Modifier.weight(1f),
+                enabled = !running && (prompt.isNotBlank() || answer.isNotBlank() || output.isNotBlank()),
+            ) {
+                vm.clearRun()
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -806,6 +783,12 @@ fun EngineScreen(
                     errorDetailId = null
                 },
                 onRefresh = { errorEntries = CoreErrors.log.all() },
+                onCopy = {
+                    copyToClipboard(
+                        context,
+                        errorEntries.joinToString("\n") { "[${it.id}] ${it.source}: ${it.message}" },
+                    )
+                },
             )
         } else if (historyExpanded) {
             Box(
@@ -836,7 +819,7 @@ fun EngineScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         items(historySessions) { session ->
-                            HistorySessionCard(session, onReuse = { prompt = it })
+                            HistorySessionCard(session, onReuse = { vm.setPrompt(it) })
                         }
                     }
                 }
@@ -859,6 +842,26 @@ fun EngineScreen(
                     } else {
                         output.lineSequence().forEach { line -> TraceLine(line) }
                         if (answer.isNotBlank()) {
+                            lastRoute?.let { route ->
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    if (route.isRemote) "REMOTE \u00b7 ${route.provider}" else "LOCAL \u00b7 GGUF",
+                                    color = if (route.isRemote) OpBlue else OpSuccess,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                            if (lastSources.isNotEmpty()) {
+                                Spacer(Modifier.height(6.dp))
+                                lastSources.forEach { src ->
+                                    Text(
+                                        "SOURCE \u00b7 $src",
+                                        color = OpTextSecondary,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
+                                }
+                            }
                             Spacer(Modifier.height(8.dp))
                             Box(
                                 Modifier
@@ -881,6 +884,7 @@ fun EngineScreen(
             }
         }
         HorizonLight(active = running)
+        SnackbarHost(snackbarHostState)
     }
 
     // ---------------- ENGINE SETTINGS (modal bottom sheet) ----------------
@@ -933,11 +937,7 @@ fun EngineScreen(
                         quantTag = selectedLocalFile?.let { f -> ModelStatus.quantTag(f.name) },
                         onLoadLocal = {
                             scope.launch {
-                                engineState = EngineUiState.LOADING
-                                status = "loading model\u2026"
-                                if (ensureLocalLoaded()) {
-                                    engineState = EngineUiState.COMPLETED
-                                }
+                                vm.ensureLocalLoaded(selectedLocalFile, contextSize, threads, modelsDir)
                             }
                         },
                         onChange = {
@@ -945,25 +945,7 @@ fun EngineScreen(
                             showPicker = true
                         },
                         onDeleteLocal = if (it.kind == ModelKind.LOCAL) {
-                            {
-                                scope.launch {
-                                    if (localLibrary.delete(it.id)) {
-                                        localModels = localLibrary.scan()
-                                        localLibrary.syncInto(
-                                            registry,
-                                            engine,
-                                            context.applicationInfo.nativeLibraryDir,
-                                            contextSize,
-                                        )
-                                        if (selectedModelId == it.id) {
-                                            selectedModelId = localModels.firstOrNull()?.id
-                                                ?: LocalModelProvider.LOCAL_MODEL_ID
-                                            prefs.lastSelectedModelId = selectedModelId
-                                        }
-                                        status = "Deleted ${it.displayName}"
-                                    }
-                                }
-                            }
+                            { deleteTarget = it }
                         } else {
                             null
                         },
@@ -1159,7 +1141,74 @@ fun EngineScreen(
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                         )
+                        if (td.permission == ToolPermission.REQUIRES_APPROVAL) {
+                            val always = td.name in toolAlwaysAllow
+                            TextButton(
+                                onClick = {
+                                    toolAlwaysAllow =
+                                        if (always) toolAlwaysAllow - td.name
+                                        else toolAlwaysAllow + td.name
+                                    prefs.toolAlwaysAllow = toolAlwaysAllow
+                                },
+                            ) {
+                                Text(
+                                    if (always) "ALWAYS" else "ALLOW",
+                                    color = if (always) OpStatusInfo else OpTextSecondary,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
                     }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Text("SKILLS", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Local workflows injected into the system prompt by task type.",
+                    color = OpTextSecondary,
+                    fontSize = 10.sp,
+                )
+                Spacer(Modifier.height(2.dp))
+                val skills = remember(skillsVersion) { toolbox.skillManager.list() }
+                if (skills.isEmpty()) {
+                    Text(
+                        "No skills \u2014 defaults re-seed on next start.",
+                        color = OpTextSecondary,
+                        fontSize = 10.sp,
+                    )
+                }
+                skills.forEach { skill ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(skill.id, color = OpText, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            Text(skill.purpose, color = OpTextSecondary, fontSize = 10.sp)
+                        }
+                        Text(
+                            if (skill.builtin) "SEEDED" else "CUSTOM",
+                            color = if (skill.builtin) OpTextSecondary else OpStatusInfo,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        if (!skill.builtin) {
+                            TextButton(onClick = { skillEditor = skill }) {
+                                Text("EDIT", color = OpStatusInfo, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                            TextButton(onClick = { skillToDelete = skill }) {
+                                Text("DEL", color = OpRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                PillButton("+ New skill", Modifier.fillMaxWidth()) {
+                    skillEditor = Skill("", "")
                 }
 
                 Spacer(Modifier.height(12.dp))
@@ -1186,7 +1235,14 @@ fun EngineScreen(
                         }
                     }
                 }
-                val dynPlan = MemoryPlanner.plan(selectedLocalFile?.length() ?: 0L, contextSize, availableRamBytes(context))
+                val localMeta = selectedLocalFile?.let { GgufMetaCache.metaFor(it) }
+                val dynPlan = MemoryPlanner.plan(
+                    modelBytes = selectedLocalFile?.length() ?: 0L,
+                    nCtx = contextSize,
+                    availRamBytes = availableRamBytes(context),
+                    layers = localMeta?.layers,
+                    hiddenDim = localMeta?.embeddingDim,
+                )
                 Text(
                     "Dynamic budget: est. ${dynPlan.totalMb.toInt()} MB \u00b7 cap ${dynPlan.availableCapMb.toInt()} MB \u00b7 max ctx ${dynPlan.maxSafeNctx}",
                     color = if (dynPlan.withinBudget) OpTextSecondary else OpAmber,
@@ -1207,12 +1263,12 @@ fun EngineScreen(
                                 EngineForegroundService.start(context)
                             }
                         } catch (e: Exception) {
-                            status = "service failed: ${e.message}"
+                            vm.setStatus("service failed: ${e.message}")
                         }
                     }
                     Spacer(Modifier.width(8.dp))
                     PillButton("Download GGUF model", Modifier.weight(1f), enabled = !running && !downloading) {
-                        downloadStatus = ""
+                        downloadStatus = resumeHint(downloadTarget)
                         downloadProgress = null
                         showSettingsSheet = false
                         showDownloadDialog = true
@@ -1221,6 +1277,11 @@ fun EngineScreen(
                 Text(
                     "Service \u00b7 ${serviceState.name}",
                     color = if (serviceState == EngineServiceState.ERROR) OpAmber else OpTextSecondary,
+                    fontSize = 10.sp,
+                )
+                Text(
+                    "STORAGE \u00b7 ${localLibrary.storageUsedBytes() / (1024L * 1024L)} MB used",
+                    color = OpTextSecondary,
                     fontSize = 10.sp,
                 )
                 Spacer(Modifier.height(8.dp))
@@ -1258,6 +1319,7 @@ fun EngineScreen(
                 if (d.kind == ModelKind.REMOTE) {
                     ensureRemoteProvider(registry, providerRegistry, prefs, d)
                 }
+                vm.notify("Selected ${d.displayName}")
                 showPicker = false
             },
             onToggleFavorite = { id ->
@@ -1267,11 +1329,11 @@ fun EngineScreen(
                 scope.launch {
                     val r = discovery.refresh()
                     RemoteProviderBootstrap.registerRemoteProviders(registry, providerRegistry)
-                    status = if (r.error == null) {
+                    vm.setStatus(if (r.error == null) {
                         "discovery: ${r.found} new models, ${registry.list().size} total (${r.endpoint})"
                     } else {
                         "discovery failed: ${r.error} (using cached catalog)"
-                    }
+                    })
                 }
             },
             onConfigure = { d ->
@@ -1295,7 +1357,7 @@ fun EngineScreen(
                     ensureRemoteProvider(registry, providerRegistry, prefs, d)
                 }
                 showKeyDialog = false
-                status = "API key set for ${keyProviderId} (memory only, never persisted)"
+                vm.setStatus("API key set for ${keyProviderId} (memory only, never persisted)")
             },
             onClear = {
                 providerRegistry.clearApiKey(keyProviderId!!)
@@ -1304,7 +1366,7 @@ fun EngineScreen(
                     ensureRemoteProvider(registry, providerRegistry, prefs, d)
                 }
                 showKeyDialog = false
-                status = "API key cleared for ${keyProviderId}"
+                vm.setStatus("API key cleared for ${keyProviderId}")
             },
             onDismiss = { showKeyDialog = false },
         )
@@ -1341,6 +1403,13 @@ fun EngineScreen(
                     when (result) {
                         is DownloadResult.Success -> {
                             downloadProgress = 1f
+                            ModelManifest.record(
+                                modelsDir,
+                                downloadTarget.name,
+                                result.sha256,
+                                result.bytes,
+                                url = url,
+                            )
                             localModels = localLibrary.scan()
                             localLibrary.syncInto(
                                 registry,
@@ -1351,11 +1420,18 @@ fun EngineScreen(
                             selectedModelId = LocalModelProvider.LOCAL_MODEL_ID
                             prefs.lastSelectedModelId = selectedModelId
                             downloadStatus = "saved ${downloadTarget.name} (${result.bytes / (1024 * 1024)} MB) \u2014 tap Load Model"
-                            status = "Model downloaded: ${downloadTarget.name} \u2014 tap Load Model"
+                            vm.setStatus("Model downloaded: ${downloadTarget.name} \u2014 tap Load Model")
+                            vm.notify("Model downloaded: ${downloadTarget.name}")
                         }
                         is DownloadResult.Error -> {
-                            downloadStatus = "failed: ${result.message}"
-                            status = "download failed: ${result.message}"
+                            if (result.message == "cancelled") {
+                                val cachedMb = ModelDownloader(downloadTarget).existingBytes / (1024 * 1024)
+                                downloadStatus = "paused \u2014 $cachedMb MB cached; tap Download to resume"
+                                vm.setStatus("download paused \u2014 $cachedMb MB cached; tap Download to resume")
+                            } else {
+                                downloadStatus = "failed: ${result.message}"
+                                vm.setStatus("download failed: ${result.message}")
+                            }
                         }
                     }
                 }
@@ -1363,6 +1439,127 @@ fun EngineScreen(
             onCancel = { downloadCancel.set(true) },
             onDismiss = {
                 if (!downloading) showDownloadDialog = false
+            },
+        )
+    }
+
+    pendingApproval?.let { req ->
+        AlertDialog(
+            onDismissRequest = { },
+            containerColor = OpBg,
+            title = { Text("Approve tool call?", color = OpText, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("${req.tool} wants to run:", color = OpText, fontSize = 13.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        redactSensitive(req.input),
+                        color = OpTextSecondary,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Permission: ${req.permission}",
+                        color = OpStatusWarn,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            },
+            confirmButton = {
+                Row {
+                    TextButton(onClick = { vm.resolveApproval(ApprovalDecision.ALLOW_ONCE) }) {
+                        Text("Allow once", color = OpText)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = { vm.resolveApproval(ApprovalDecision.ALWAYS_ALLOW) }) {
+                        Text("Always allow", color = OpText)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.resolveApproval(ApprovalDecision.DENY) }) {
+                    Text("Deny", color = OpRed)
+                }
+            },
+        )
+    }
+
+    if (deleteTarget != null) {
+        val d = deleteTarget!!
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            containerColor = OpBg,
+            title = { Text("Delete ${d.displayName}?", color = OpText, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Removes the local GGUF file from storage. This cannot be undone.",
+                    color = OpTextSecondary,
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteTarget = null
+                    scope.launch {
+                        if (localLibrary.delete(d.id)) {
+                            localModels = localLibrary.scan()
+                            localLibrary.syncInto(
+                                registry,
+                                engine,
+                                context.applicationInfo.nativeLibraryDir,
+                                contextSize,
+                            )
+                            if (selectedModelId == d.id) {
+                                selectedModelId = localModels.firstOrNull()?.id
+                                    ?: LocalModelProvider.LOCAL_MODEL_ID
+                                prefs.lastSelectedModelId = selectedModelId
+                            }
+                            vm.setStatus("Deleted ${d.displayName}")
+                            vm.notify("Deleted ${d.displayName}")
+                        }
+                    }
+                }) { Text("Delete", color = OpRed) }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } },
+        )
+    }
+
+    skillToDelete?.let { skill ->
+        AlertDialog(
+            onDismissRequest = { skillToDelete = null },
+            containerColor = OpBg,
+            title = { Text("Delete skill?", color = OpText, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Delete \u201c${skill.id}\u201d? It is removed from storage and the registry.",
+                    color = OpTextSecondary,
+                    fontSize = 12.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    toolbox.skillManager.delete(skill.id)
+                    skillsVersion++
+                    skillToDelete = null
+                    vm.setStatus("Deleted skill ${skill.id}")
+                }) { Text("Delete", color = OpRed) }
+            },
+            dismissButton = { TextButton(onClick = { skillToDelete = null }) { Text("Cancel") } },
+        )
+    }
+
+    skillEditor?.let { target ->
+        SkillEditorDialog(
+            skill = target,
+            onDismiss = { skillEditor = null },
+            onSave = { updated ->
+                toolbox.skillManager.register(updated)
+                skillsVersion++
+                skillEditor = null
+                vm.setStatus(if (target.id.isBlank()) "Created skill ${updated.id}" else "Updated skill ${updated.id}")
+                vm.notify(if (target.id.isBlank()) "Created skill ${updated.id}" else "Updated skill ${updated.id}")
             },
         )
     }
@@ -1383,11 +1580,62 @@ fun EngineScreen(
                     "VECT   error: ${e.message}"
                 })
             },
+            onBenchmark = {
+                if (!benchmarking && !running) {
+                    scope.launch {
+                        benchmarking = true
+                        benchmarkLines = listOf("running benchmark \u2026")
+                        val results = runCatching {
+                            ModelBenchmark(registry, toolbox.memory).run(selectedModelId)
+                        }.getOrDefault(emptyList())
+                        benchmarkLines = if (results.isEmpty()) {
+                            listOf("benchmark unavailable for $selectedModelId")
+                        } else {
+                            results.map { r ->
+                                val speed = r.tokensPerSec?.let { "%.1f tok/s".format(it) } ?: ""
+                                val latency = r.remoteLatencyMs?.let { "${it} ms latency" } ?: ""
+                                if (r.ok) {
+                                    "${r.category}: ${r.tokens} tok \u00b7 ${r.durationMs} ms" +
+                                        (if (speed.isNotBlank()) " \u00b7 $speed" else "") +
+                                        (if (latency.isNotBlank()) " \u00b7 $latency" else "")
+                                } else {
+                                    "${r.category}: failed \u2014 ${r.error}"
+                                }
+                            }
+                        }
+                        benchmarking = false
+                    }
+                }
+            },
+            benchmarking = benchmarking,
+            benchmarkLines = benchmarkLines,
+            trainingExportLines = trainingExportLines,
+            exportingTraining = exportingTraining,
+            onExportTraining = {
+                if (!exportingTraining && !running) {
+                    scope.launch {
+                        exportingTraining = true
+                        trainingExportLines = listOf("exporting \u2026")
+                        val r = trainingPipeline.exportVerifiedTrainingData()
+                        val elig = trainingPipeline.triggerBackgroundFinetune(r)
+                        trainingExportLines = buildList {
+                            add("DATASET  ${r.file?.name ?: "none"}")
+                            add("PAIRS    ${r.exported} / min ${trainingPipeline.minPairs}")
+                            if (r.reason != "ok") add("REASON   ${r.reason}")
+                            add("ON-DEVICE LoRA ${if (elig.eligible) "ELIGIBLE" else "NOT ELIGIBLE"}")
+                            elig.reasons.forEach { add("  \u00b7 $it") }
+                        }
+                        exportingTraining = false
+                    }
+                }
+            },
             onClear = {
                 runtimeMetrics.reset()
                 diagnosticsSnapshot = null
-                status = "runtime metrics cleared"
+                vm.setStatus("runtime metrics cleared")
             },
+            onCopy = { text -> copyToClipboard(context, text) },
+            onShare = { text -> shareText(context, text) },
             onDismiss = { showDiagnostics = false },
         )
     }
@@ -1399,7 +1647,15 @@ private fun DiagnosticsDialog(
     snapshot: DiagnosticsSnapshot?,
     serviceState: String,
     runtimeLines: List<String> = emptyList(),
+    onBenchmark: () -> Unit = {},
+    benchmarking: Boolean = false,
+    benchmarkLines: List<String> = emptyList(),
+    trainingExportLines: List<String> = emptyList(),
+    exportingTraining: Boolean = false,
+    onExportTraining: () -> Unit = {},
     onClear: () -> Unit,
+    onCopy: (String) -> Unit,
+    onShare: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val lines = snapshot?.let { snap ->
@@ -1450,6 +1706,61 @@ private fun DiagnosticsDialog(
                     Spacer(Modifier.height(4.dp))
                     Text("Run a task or load a model first.", color = OpTextSecondary, fontSize = 11.sp)
                 }
+                if (snapshot != null && snapshot.ceilingBytes > 0) {
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { (snapshot.rssBytes.toFloat() / snapshot.ceilingBytes.toFloat()).coerceIn(0f, 1f) },
+                        color = if (snapshot.overLimit) OpRed else OpStatusInfo,
+                        trackColor = OpDivider,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (benchmarkLines.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    benchmarkLines.forEach { line ->
+                        Text(
+                            line,
+                            color = OpTextSecondary,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(vertical = 1.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    PillButton(
+                        if (exportingTraining) "Export \u2026" else "Export dataset",
+                        Modifier.weight(1f),
+                        enabled = !exportingTraining,
+                        loading = exportingTraining,
+                    ) { onExportTraining() }
+                }
+                if (trainingExportLines.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    trainingExportLines.forEach { line ->
+                        Text(
+                            line,
+                            color = OpTextSecondary,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(vertical = 1.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    PillButton(
+                        if (benchmarking) "Benchmark \u2026" else "Benchmark",
+                        Modifier.weight(1f),
+                        enabled = !benchmarking,
+                        loading = benchmarking,
+                    ) { onBenchmark() }
+                    Spacer(Modifier.width(8.dp))
+                    PillButton("Copy", Modifier.weight(1f)) { onCopy(lines.joinToString("\n")) }
+                    Spacer(Modifier.width(8.dp))
+                    PillButton("Share", Modifier.weight(1f)) { onShare(lines.joinToString("\n")) }
+                }
             }
         },
         confirmButton = {
@@ -1485,7 +1796,8 @@ private fun TraceLine(line: String) {
         )
         t.startsWith("[") && t.endsWith("]") -> StepRow(t, OpAmber)
         t.startsWith("MODEL ") || t.startsWith("PROVIDER ") ||
-            t.startsWith("MODE ") || t.startsWith("STATUS ") -> Text(
+            t.startsWith("MODE ") || t.startsWith("STATUS ") ||
+            t.startsWith("FALLBACK ") -> Text(
             t, color = OpTextSecondary, fontSize = 12.sp,
             modifier = Modifier.padding(start = 12.dp),
         )
@@ -1495,6 +1807,121 @@ private fun TraceLine(line: String) {
             modifier = Modifier.padding(start = 12.dp, top = 2.dp),
         )
     }
+}
+
+/** Phase 10 — create/update a user skill (never executable code). */
+@Composable
+private fun SkillEditorDialog(
+    skill: Skill,
+    onDismiss: () -> Unit,
+    onSave: (Skill) -> Unit,
+) {
+    val editing = skill.id.isNotBlank()
+    var id by remember { mutableStateOf(skill.id) }
+    var purpose by remember { mutableStateOf(skill.purpose) }
+    var tools by remember { mutableStateOf(skill.tools.joinToString(", ")) }
+    var workflow by remember { mutableStateOf(skill.workflow.joinToString("\n")) }
+    var constraints by remember { mutableStateOf(skill.constraints) }
+    val idValid = id.matches(Regex("[a-z0-9][a-z0-9-]*")) && id.isNotBlank()
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = OpRed,
+        unfocusedBorderColor = OpBorder,
+        errorBorderColor = OpRed,
+        cursorColor = OpRed,
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = OpBg,
+        title = {
+            Text(
+                if (editing) "EDIT SKILL" else "NEW SKILL",
+                color = OpText,
+                fontWeight = FontWeight.Bold,
+            )
+        },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedTextField(
+                    value = id,
+                    onValueChange = { id = it.lowercase() },
+                    enabled = !editing,
+                    label = { Text("id", color = OpTextSecondary) },
+                    isError = id.isNotBlank() && !idValid,
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = purpose,
+                    onValueChange = { purpose = it },
+                    label = { Text("purpose", color = OpTextSecondary) },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = tools,
+                    onValueChange = { tools = it },
+                    label = { Text("tools (comma-separated, optional)", color = OpTextSecondary) },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = workflow,
+                    onValueChange = { workflow = it },
+                    label = { Text("workflow (one step per line)", color = OpTextSecondary) },
+                    minLines = 3,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = constraints,
+                    onValueChange = { constraints = it },
+                    label = { Text("constraints (optional)", color = OpTextSecondary) },
+                    minLines = 2,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = idValid && purpose.isNotBlank(),
+                onClick = {
+                    onSave(
+                        Skill(
+                            id = id.trim(),
+                            purpose = purpose.trim(),
+                            tools = tools.split(",").map { it.trim() }.filter { it.isNotEmpty() },
+                            workflow = workflow.lineSequence()
+                                .map { it.trim() }
+                                .filter { it.isNotEmpty() }
+                                .toList(),
+                            constraints = constraints.trim(),
+                            builtin = false,
+                        ),
+                    )
+                },
+            ) { Text("Save", color = OpRed) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** Honest resume hint for the download dialog (partial .tmp exists). */
+private fun resumeHint(target: File): String {
+    val cachedMb = ModelDownloader(target).existingBytes / (1024 * 1024)
+    return if (cachedMb > 0L) "partial download found \u2014 $cachedMb MB cached; Download resumes" else ""
 }
 
 @Composable
@@ -1513,185 +1940,6 @@ private fun StepRow(text: String, color: Color) {
     }
 }
 
-/** Engine console state shown in the header, driven by real operations. */
-private enum class EngineUiState(val label: String) {
-    READY("READY"),
-    LOADING("LOADING MODEL"),
-    THINKING("THINKING"),
-    TOOL("EXECUTING TOOL"),
-    VERIFYING("VERIFYING"),
-    COMPLETED("COMPLETED"),
-    ERROR("ERROR"),
-    OFFLINE("OFFLINE"),
-}
-
-private fun runAgent(
-    context: Context,
-    registry: ModelRegistry,
-    prefs: ModelPreferencesStore,
-    toolbox: Toolbox,
-    prompt: String,
-    mode: RoutingMode,
-    modeLabel: String,
-    preferredId: String?,
-    loaded: Boolean,
-    metrics: RuntimeMetrics,
-    setRunning: (Boolean) -> Unit,
-    setStatus: (String) -> Unit,
-    setOutput: (String) -> Unit,
-    setAnswer: (String) -> Unit,
-    setRunJob: (Job?) -> Unit,
-    setEngineState: (EngineUiState) -> Unit,
-    scope: kotlinx.coroutines.CoroutineScope,
-) {
-    // Privacy: Local Only forces offline routing regardless of the mode.
-    val effectiveMode = if (prefs.privacyMode == PrivacyMode.LOCAL_ONLY) {
-        RoutingMode.OFFLINE_ONLY
-    } else {
-        mode
-    }
-    setRunning(true)
-    setOutput("")
-    setAnswer("")
-    setStatus("agent running\u2026")
-    setEngineState(EngineUiState.THINKING)
-    setRunJob(scope.launch {
-        val memory = toolbox.memory
-        val tools = toolbox.tools
-        val agent = ThinkingAgent(
-            router = ModelRouter(mode = effectiveMode),
-            registry = registry,
-            memory = memory,
-            tools = tools,
-            networkAvailable = hasNetwork(context),
-            preferredId = preferredId,
-            systemPromptOverride = prefs.systemPromptOverride,
-            sourceSearch = toolbox.sourceSearch,
-        )
-        val sessionId = try {
-            val id = memory.startSession("agent: ${prompt.take(60)}")
-            memory.recordMessage(id, "user", prompt)
-            id
-        } catch (e: Exception) {
-            null // memory failure must never crash the agent
-        }
-        try {
-            val steps = StringBuilder()
-            val answer = StringBuilder()
-            var done = false
-            var tokenCount = 0
-            var routedCount = 0
-            var toolName = ""
-            var toolStartedMs = 0L
-            val runStarted = System.currentTimeMillis()
-            val stampFmt = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
-            fun log(s: String) {
-                steps.appendLine(java.time.LocalTime.now().format(stampFmt) + " " + s)
-            }
-            agent.run(prompt, GenerationConfig(maxTokens = 256)).collect { ev ->
-                when (ev) {
-                    is AgentEvent.Token -> {
-                        tokenCount++
-                        metrics.recordFirstToken(System.currentTimeMillis() - runStarted)
-                        answer.append(ev.text)
-                        setAnswer(answer.toString())
-                    }
-                    is AgentEvent.Stage -> {
-                        log("[${ev.state}]")
-                        setOutput(steps.toString())
-                        setEngineState(
-                            when (ev.state) {
-                                AgentState.VERIFY -> EngineUiState.VERIFYING
-                                AgentState.EXECUTE, AgentState.OBSERVE -> EngineUiState.TOOL
-                                AgentState.FINALIZE, AgentState.STORE -> EngineUiState.THINKING
-                                else -> EngineUiState.THINKING
-                            },
-                        )
-                    }
-                    is AgentEvent.Routed -> {
-                        routedCount++
-                        if (routedCount > 1) metrics.recordRetry()
-                        val remote = ev.provider != "local"
-                        log("MODEL ${ev.modelId}")
-                        log("PROVIDER ${ev.provider}")
-                        log("MODE ${if (remote) "Remote (${modeLabel})" else modeLabel}")
-                        log("STATUS ${if (remote) "Running \u00b7 remote request" else "Running \u00b7 local"}")
-                        log("[${ev.taskType} | ${ev.costTier}]")
-                        setOutput(steps.toString())
-                    }
-                    is AgentEvent.ToolCall -> {
-                        toolName = ev.tool
-                        toolStartedMs = System.currentTimeMillis()
-                        log("[TOOL] ${ev.tool}(${ev.input})")
-                        setOutput(steps.toString())
-                        setEngineState(EngineUiState.TOOL)
-                    }
-                    is AgentEvent.Observation -> {
-                        if (toolName.isNotEmpty()) {
-                            metrics.recordTool(toolName, System.currentTimeMillis() - toolStartedMs, true)
-                            toolName = ""
-                        }
-                        log("[OBS] ${ev.output.take(240)}")
-                        setOutput(steps.toString())
-                    }
-                    is AgentEvent.Verification -> {
-                        if (!ev.passed && toolName.isNotEmpty()) {
-                            metrics.recordTool(toolName, 0L, false)
-                            toolName = ""
-                        }
-                        log("[VERIFY] ${ev.tool}: " +
-                            if (ev.passed) "passed" else "failed")
-                        setOutput(steps.toString())
-                        setEngineState(EngineUiState.VERIFYING)
-                    }
-                    is AgentEvent.Final -> {
-                        done = true
-                        log("[FINAL]")
-                        answer.setLength(0)
-                        answer.append(ev.answer)
-                        if (sessionId != null) {
-                            try {
-                                memory.recordMessage(sessionId, "agent", ev.answer)
-                            } catch (_: Exception) {
-                                // best-effort conversation persistence
-                            }
-                        }
-                        setOutput(steps.toString())
-                        setAnswer(answer.toString())
-                        setEngineState(EngineUiState.COMPLETED)
-                    }
-                    is AgentEvent.Error -> {
-                        metrics.recordError()
-                        log("[ERROR] ${ev.message}")
-                        setOutput(steps.toString())
-                        setStatus("agent error: ${ev.message}")
-                        setEngineState(EngineUiState.ERROR)
-                    }
-                }
-            }
-            metrics.recordRun(tokenCount, System.currentTimeMillis() - runStarted)
-            setStatus(if (done) "agent done" else "agent ended without final answer")
-            if (!done) setEngineState(EngineUiState.READY)
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            setStatus("agent stopped")
-            setEngineState(EngineUiState.READY)
-        } catch (e: Exception) {
-            CoreErrors.log.record("agent", "run failed: ${e.message}", e)
-            setStatus("agent failed: ${e.message}")
-            setEngineState(EngineUiState.ERROR)
-        } finally {
-            if (sessionId != null) {
-                try {
-                    memory.endSession(sessionId)
-                } catch (_: Exception) {
-                    // best-effort session close
-                }
-            }
-            setRunning(false)
-        }
-        setRunJob(null)
-    })
-}
 
 @Composable
 private fun PillButton(
@@ -1699,12 +1947,13 @@ private fun PillButton(
     modifier: Modifier = Modifier,
     primary: Boolean = false,
     enabled: Boolean = true,
+    loading: Boolean = false,
     onClick: () -> Unit,
 ) {
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier,
+        modifier = modifier.defaultMinSize(minHeight = 48.dp),
         shape = RoundedCornerShape(24.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (primary) OpRed else OpCard,
@@ -1714,7 +1963,17 @@ private fun PillButton(
         ),
         border = if (primary) null else BorderStroke(1.dp, OpDivider),
     ) {
-        Text(text)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    color = if (primary) Color.White else OpTextSecondary,
+                    strokeWidth = 2.dp,
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(text)
+        }
     }
 }
 
@@ -1728,7 +1987,7 @@ private fun HistorySessionCard(session: ChatSession, onReuse: (String) -> Unit) 
             .padding(10.dp),
     ) {
         Text(
-            "${formatHistoryTime(session.startedAt)} \u00b7 ${session.meta.ifBlank { "session ${session.id}" }}",
+            "${formatHistoryTime(session.startedAt)} \u00b7 ${session.messages.size} turn${if (session.messages.size == 1) "" else "s"} \u00b7 ${session.meta.ifBlank { "session ${session.id}" }}",
             color = OpTextSecondary,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
@@ -1783,6 +2042,7 @@ private fun ValuePill(
                 BorderStroke(1.dp, if (selected) OpBorder else OpDivider),
                 RoundedCornerShape(20.dp),
             )
+            .defaultMinSize(minHeight = 48.dp)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
     )
@@ -1794,6 +2054,28 @@ private fun availableRamBytes(context: Context): Long {
     val info = android.app.ActivityManager.MemoryInfo()
     am.getMemoryInfo(info)
     return info.availMem
+}
+
+private fun formatElapsed(ms: Long): String =
+    String.format(Locale.US, "%d:%02d", ms / 60000, (ms % 60000) / 1000)
+
+private fun redactSensitive(input: String): String =
+    input.replace(
+        Regex("(?i)(token|key|secret|password|api[_ -]?key|authorization)[=:][^ ,;\\n]+"),
+        "$1=***",
+    ).take(240)
+
+private fun copyToClipboard(context: Context, text: String) {
+    val cm = context.getSystemService(ClipboardManager::class.java)
+    cm?.setPrimaryClip(ClipData.newPlainText("native-ai", text))
+}
+
+private fun shareText(context: Context, text: String) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    runCatching { context.startActivity(Intent.createChooser(intent, "Share")) }
 }
 
 private fun modeIndexFor(mode: RoutingMode): Int = when (mode) {
@@ -2153,7 +2435,7 @@ private fun ModelDownloadDialog(
                 QUICK_MODELS.forEach { q ->
                     Text(
                         q.label,
-                        color = OpRed,
+                        color = OpLinkAccent,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
@@ -2180,7 +2462,7 @@ private fun ModelDownloadDialog(
                     Spacer(Modifier.height(10.dp))
                     LinearProgressIndicator(
                         progress = { progress ?: 0f },
-                        color = OpRed,
+                        color = OpStatusInfo,
                         trackColor = OpDivider,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -2235,6 +2517,7 @@ private fun ErrorLogView(
     onToggleDetail: (Long) -> Unit,
     onClear: () -> Unit,
     onRefresh: () -> Unit,
+    onCopy: () -> Unit,
 ) {
     Column(
         modifier
@@ -2273,6 +2556,17 @@ private fun ErrorLogView(
                 modifier = Modifier
                     .clip(RoundedCornerShape(6.dp))
                     .clickable { onRefresh() }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "COPY",
+                color = OpTextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(enabled = entries.isNotEmpty()) { onCopy() }
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }

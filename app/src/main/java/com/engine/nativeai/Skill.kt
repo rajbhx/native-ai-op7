@@ -14,6 +14,9 @@ data class Skill(
     val workflow: List<String> = emptyList(),
     val constraints: String = "",
     val verificationRules: List<String> = emptyList(),
+    /** Seeded skills are read-only (they re-seed on empty); user skills are
+     *  created/edited/deleted from the SKILLS panel (Phase 10). */
+    val builtin: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -22,6 +25,7 @@ data class Skill(
         put("workflow", JSONArray(workflow))
         put("constraints", constraints)
         put("verification_rules", JSONArray(verificationRules))
+        put("builtin", builtin)
     }
 
     companion object {
@@ -38,6 +42,7 @@ data class Skill(
             verificationRules = j.optJSONArray("verification_rules")?.let { arr ->
                 buildList { for (i in 0 until arr.length()) add(arr.getString(i)) }
             } ?: emptyList(),
+            builtin = j.optBoolean("builtin", false),
         )
     }
 }

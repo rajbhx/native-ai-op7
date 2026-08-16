@@ -499,6 +499,12 @@ class MemoryDatabase(context: Context) :
             "SELECT * FROM source_chunks WHERE id = ?", arrayOf(id.toString()),
         ).use { c -> if (c.moveToFirst()) c.toSourceChunk() else null }
 
+    override fun chunksForFile(fileId: Long): List<SourceChunk> =
+        readableDatabase.rawQuery(
+            "SELECT * FROM source_chunks WHERE source_file_id = ? ORDER BY chunk_index ASC",
+            arrayOf(fileId.toString()),
+        ).use { c -> buildList { while (c.moveToNext()) add(c.toSourceChunk()) } }
+
     override fun sourceFiles(sourceId: Long): List<SourceFile> =
         readableDatabase.rawQuery(
             "SELECT * FROM source_files WHERE source_id = ? ORDER BY path ASC",

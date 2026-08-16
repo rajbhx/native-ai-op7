@@ -14,6 +14,10 @@ class SourceUpdater(
     private val db: SourceStore,
     private val fetcher: SourceFetcher = HttpSourceFetcher(),
     private val textExtractor: DocumentTextExtractor? = null,
+    /** Ingest-time HNSW population: dormant until a benchmark-validated
+     *  embedder exists (docs/EMBEDDINGS.md) — never a fake vector path. */
+    private val vectorIndex: VectorIndex? = null,
+    private val embeddingProvider: EmbeddingProvider? = null,
 ) {
     data class UpdateReport(
         val skippedBusy: Boolean = false,
@@ -26,6 +30,27 @@ class SourceUpdater(
     @Volatile private var stopRequested = false
 
     val isRunning: Boolean get() = running.get()
+
+    /**
+     * Index freshly stored chunks into the HNSW vector index — only when
+     * BOTH the index and a real embedder report available (gate closed
+     * until the on-device embedding benchmark passes). Failures are
+     * swallowed: search falls back to BM25, ingest must never break on a
+     * vector write.
+     */
+    private suspend fun indexChunksIfReady(fileId: Long) {
+        val index = vectorIndex ?: return
+        val embedder = embeddingProvider ?: return
+        if (!index.available || !embedder.available) return
+        val chunks = db.chunksForFile(fileId)
+        var added = 0
+        for (c in chunks) {
+            val vec = runCatching { embedder.embed(c.content) }.getOrNull() ?: continue
+            index.add(c.id, vec)
+            added++
+        }
+        if (added > 0) index.save()
+    }
 
     /** Request the running update loop to stop after the current source. */
     fun updateStop() {
@@ -134,6 +159,7 @@ class SourceUpdater(
                 SourceFile(id = 0, sourceId = s.id, path = e.path, blobSha = e.sha, sizeBytes = body.size.toLong()),
             )
             db.replaceSourceChunks(s.id, fileId, chunks)
+            indexChunksIfReady(fileId)
             bytes += body.size
         }
         // Drop files removed upstream (uBO keeps index consistent with source).
@@ -167,6 +193,7 @@ class SourceUpdater(
             SourceFile(id = 0, sourceId = s.id, path = "root", blobSha = resp.etag, sizeBytes = body.size.toLong()),
         )
         db.replaceSourceChunks(s.id, fileId, chunks)
+        indexChunksIfReady(fileId)
         db.touchSourceWrite(s.id, null, resp.etag, resp.lastModified, SourceStatus.INDEXED, 1, body.size.toLong())
         return body.size.toLong()
     }
@@ -209,6 +236,7 @@ class SourceUpdater(
                 SourceFile(id = 0, sourceId = s.id, path = path, blobSha = marker, sizeBytes = page.size.toLong()),
             )
             db.replaceSourceChunks(s.id, fileId, chunks)
+            indexChunksIfReady(fileId)
             bytes += page.size
         }
         val allFiles = db.sourceFiles(s.id)
@@ -268,6 +296,7 @@ class SourceUpdater(
             SourceFile(id = 0, sourceId = s.id, path = "root", blobSha = marker, sizeBytes = bytes.size.toLong()),
         )
         db.replaceSourceChunks(s.id, fileId, chunks)
+        indexChunksIfReady(fileId)
         db.touchSourceWrite(s.id, marker, null, null, SourceStatus.INDEXED, 1, bytes.size.toLong())
         return text.length.toLong()
     }
@@ -290,6 +319,7 @@ class SourceUpdater(
             SourceFile(id = 0, sourceId = s.id, path = f.name, blobSha = marker, sizeBytes = f.length()),
         )
         db.replaceSourceChunks(s.id, fileId, chunks)
+        indexChunksIfReady(fileId)
         db.touchSourceWrite(s.id, marker, null, null, SourceStatus.INDEXED, 1, f.length())
         return f.length()
     }

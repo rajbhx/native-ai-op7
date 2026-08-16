@@ -15,6 +15,9 @@ interface SourceStore {
     fun collections(): List<SourceCollection>
     fun sourceFiles(sourceId: Long): List<SourceFile>
     fun chunkById(id: Long): SourceChunk?
+    /** All chunks for one file, in chunk_index order (ingest-time vector
+     *  indexing reads this after replaceSourceChunks). */
+    fun chunksForFile(fileId: Long): List<SourceChunk>
     fun upsertSourceFile(f: SourceFile): Long
     fun deleteSourceFile(fileId: Long)
     fun replaceSourceChunks(sourceId: Long, fileId: Long, chunks: List<String>)

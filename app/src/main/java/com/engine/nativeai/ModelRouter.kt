@@ -51,7 +51,10 @@ class ModelRouter(
         fun pick(descs: List<ModelDescriptor>): ModelDescriptor? =
             descs.filter { healthMonitor.isHealthy(it.id) }
                 .sortedWith(compareByDescending<ModelDescriptor> { it.reliabilityScore ?: 0 }
-                    .thenByDescending { it.speedScore ?: 0 })
+                    .thenByDescending { it.speedScore ?: 0 }
+                    // Measured latency breaks ties: prefer the fastest healthy
+                    // candidate (never fabricated — nulls sort last).
+                    .thenBy { healthMonitor.latencyMs(it.id) ?: Long.MAX_VALUE })
                 .firstOrNull()
 
         when (mode) {
@@ -108,4 +111,7 @@ class ModelRouter(
 
     fun reportFailure(providerId: String, error: String = "") =
         healthMonitor.reportFailure(providerId, error)
+
+    /** Last recorded failure reason for a provider ("" when none/healthy). */
+    fun lastError(providerId: String): String = healthMonitor.lastError(providerId)
 }

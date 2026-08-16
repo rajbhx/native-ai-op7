@@ -29,16 +29,22 @@ class ThinkingAgent(
     private val preferredId: String? = null,
     private val systemPromptOverride: String? = null,
     private val sourceSearch: SourceSearch? = null,
+    private val skills: List<Skill> = emptyList(),
+    private val onApproval: suspend (ToolApprovalRequest) -> ApprovalDecision =
+        { ApprovalDecision.DENY },
 ) {
     fun run(
         userPrompt: String,
         config: GenerationConfig = GenerationConfig(maxTokens = 256),
+        priorConversation: String = "",
     ): Flow<AgentEvent> = flow {
         var state = AgentState.IDLE
         var replan = false
         val observations = mutableListOf<String>()
-        val executor = ToolExecutor(tools, memory)
+        val citedSources = linkedSetOf<String>()
+        val executor = ToolExecutor(tools, memory, onApproval = onApproval)
         val taskType = TaskClassifier.classify(userPrompt, networkAvailable)
+        val skill = skillFor(taskType)
 
         repeat(maxIterations) {
             if (state == AgentState.CANCELLED) return@flow
@@ -62,7 +68,16 @@ class ThinkingAgent(
                 emit(AgentEvent.Error("no model available (mode=${router.mode}, network=$networkAvailable)"))
                 return@flow
             }
-            emit(AgentEvent.Routed(descriptor.id, descriptor.provider, descriptor.costTier, taskType))
+            val routedReason = if (preferredId != null && descriptor.id != preferredId) {
+                val why = router.lastError(preferredId).ifEmpty { "not available in mode ${router.mode}" }
+                "preferred $preferredId unavailable ($why) \u2014 using ${descriptor.id}"
+            } else ""
+            emit(
+                AgentEvent.Routed(
+                    descriptor.id, descriptor.provider, descriptor.costTier, taskType,
+                    reason = routedReason,
+                ),
+            )
 
             val memoryCtx = try {
                 withContext(Dispatchers.IO) { memory.searchContext(userPrompt, topK = 3) }
@@ -75,13 +90,17 @@ class ThinkingAgent(
             // Hybrid context (roadmap Phase 6): top source-KB hits join memory
             // for knowledge-seeking tasks. Source KB is user-supplied knowledge
             // (not the private memory DB), so no remote privacy filter applies.
-            val sourceCtx = if (sourceSearch != null && taskType.consultsSources()) {
+            val sourceHits = if (sourceSearch != null && taskType.consultsSources()) {
                 try {
-                    formatSourceHits(withContext(Dispatchers.IO) { sourceSearch.search(userPrompt, 3) })
+                    withContext(Dispatchers.IO) { sourceSearch.search(userPrompt, 3) }
                 } catch (e: Exception) {
-                    "" // source lookup failure must never kill the agent loop
+                    emptyList() // source lookup failure must never kill the agent loop
                 }
-            } else ""
+            } else emptyList()
+            sourceHits.take(5).forEach { h ->
+                citedSources.add("[${h.sourceTitle}/${h.filePath}]")
+            }
+            val sourceCtx = if (sourceHits.isEmpty()) "" else formatSourceHits(sourceHits)
 
             state = AgentState.PLAN
             emit(AgentEvent.Stage(state))
@@ -101,7 +120,14 @@ class ThinkingAgent(
                 } else {
                     memoryCtx
                 }
-                val userCtx = contextManager.build("", userPrompt, ctx, observations, sources = sourceCtx)
+                val userCtx = contextManager.build(
+                    "",
+                    userPrompt,
+                    ctx,
+                    observations,
+                    sources = sourceCtx,
+                    conversation = priorConversation,
+                )
                 val request = ModelRequest(
                     system = systemPromptOverride ?: systemPrompt(),
                     prompt = ContextAdapter.fit(userCtx.trim(), descriptor.contextLength ?: 2048),
@@ -138,7 +164,16 @@ class ThinkingAgent(
                     }
                     descriptor = fallback
                     provider = registry.providerFor(descriptor) ?: continue
-                    emit(AgentEvent.Routed(descriptor.id, descriptor.provider, descriptor.costTier, taskType))
+                    val routedReason = if (preferredId != null && descriptor.id != preferredId) {
+                        val why = router.lastError(preferredId).ifEmpty { "not available in mode ${router.mode}" }
+                        "preferred $preferredId unavailable ($why) \u2014 using ${descriptor.id}"
+                    } else ""
+                    emit(
+                        AgentEvent.Routed(
+                            descriptor.id, descriptor.provider, descriptor.costTier, taskType,
+                            reason = routedReason,
+                        ),
+                    )
                 }
             }
             if (!generated) {
@@ -160,7 +195,7 @@ class ThinkingAgent(
                         answer.isNotBlank(),
                     )
                 }
-                emit(AgentEvent.Final(answer))
+                emit(AgentEvent.Final(answer, citedSources.toList()))
                 return@flow
             }
 
@@ -190,7 +225,7 @@ class ThinkingAgent(
                         result.output.take(500), result.ok,
                     )
                 }
-                emit(AgentEvent.Final(result.output))
+                emit(AgentEvent.Final(result.output, citedSources.toList()))
                 return@flow
             }
 
@@ -206,12 +241,36 @@ class ThinkingAgent(
     }
 
     private fun systemPrompt(): String =
-        """
-        You are a local resource-constrained agent running on a phone.
-        Think step by step, then reply with ONLY one JSON object and no prose:
-        {"action": "<tool_name>", "input": "<tool input>"}
-        Use final_answer when you have enough information.
-        Available tools:
-        ${tools.descriptions()}
-        """.trimIndent()
+        buildString {
+            append(
+                """
+                You are a local resource-constrained agent running on a phone.
+                Think step by step, then reply with ONLY one JSON object and no prose:
+                {"action": "<tool_name>", "input": "<tool input>"}
+                Use final_answer when you have enough information.
+                Available tools:
+                ${tools.descriptions()}
+                """.trimIndent(),
+            )
+            skill?.let { sk ->
+                append("\n\nActive skill: ${sk.id} — ${sk.purpose}")
+                if (sk.workflow.isNotEmpty()) {
+                    append("\nWorkflow:\n").append(sk.workflow.joinToString("\n") { "- $it" })
+                }
+                if (sk.constraints.isNotBlank()) {
+                    append("\nConstraints: ").append(sk.constraints)
+                }
+            }
+        }
+
+    /** Deterministic skill selection by task type (no model round-trip). */
+    private fun skillFor(taskType: TaskType): Skill? {
+        val wanted = when (taskType) {
+            TaskType.CODING, TaskType.DEBUGGING -> "coding"
+            TaskType.RESEARCH, TaskType.SUMMARIZATION, TaskType.DOCUMENT_ANALYSIS,
+            TaskType.TOOL_EXECUTION -> "research"
+            else -> null
+        } ?: return null
+        return skills.firstOrNull { it.id == wanted }
+    }
 }

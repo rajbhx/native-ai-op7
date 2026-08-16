@@ -14,6 +14,11 @@ object MemoryPlanner {
     const val MIN_NCTX = 256
     const val MAX_NCTX = 2048
 
+    // Labeled fallback when GGUF metadata is unknown (3B-class estimate).
+    // Real callers pass measured layers/hiddenDim from GgufMetadataReader.
+    const val DEFAULT_LAYERS = 28
+    const val DEFAULT_HIDDEN_DIM = 2048
+
     data class Plan(
         val weightsMb: Double,
         val kvCacheMb: Double,
@@ -31,18 +36,20 @@ object MemoryPlanner {
         modelBytes: Long,
         nCtx: Int,
         availRamBytes: Long,
-        layers: Int = 28,
-        hiddenDim: Int = 2048,
+        layers: Int? = null,
+        hiddenDim: Int? = null,
         kvElementBytes: Int = 1,
         safetyMargin: Double = SAFETY_MARGIN,
     ): Plan {
+        val layerCount = layers ?: DEFAULT_LAYERS
+        val hidden = hiddenDim ?: DEFAULT_HIDDEN_DIM
         val weightsMb = modelBytes / (1024.0 * 1024.0)
         val graphMb = Op7SystemProfile.GGML_SCRATCH_MAX_MB.toDouble()
         val sqliteMb = Op7SystemProfile.SQLITE_FTS5_MAX_MB.toDouble()
         val availMb = availRamBytes / (1024.0 * 1024.0)
         // Hard cap 1536 MB; never exceed, but shrink with live available RAM.
         val capMb = minOf(availMb * (1.0 - safetyMargin), Op7SystemProfile.MEMORY_LIMIT_MB.toDouble())
-        val kvPerCtxMb = 2.0 * layers * hiddenDim * kvElementBytes / (1024.0 * 1024.0)
+        val kvPerCtxMb = 2.0 * layerCount * hidden * kvElementBytes / (1024.0 * 1024.0)
         val kvMb = kvPerCtxMb * nCtx
         val fixedMb = weightsMb + graphMb + sqliteMb
         val totalMb = fixedMb + kvMb

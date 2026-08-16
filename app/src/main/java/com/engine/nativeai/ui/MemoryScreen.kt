@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -35,10 +36,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.engine.nativeai.Experience
+import com.engine.nativeai.GgufMetaCache
+import com.engine.nativeai.MemoryBudget
 import com.engine.nativeai.Fact
 import com.engine.nativeai.MemoryDatabase
 import com.engine.nativeai.Message
 import com.engine.nativeai.SessionInfo
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -141,7 +145,11 @@ fun MemoryScreen(onBack: () -> Unit) {
                 messages = messages,
                 onBackToList = { selectedSession = null },
             )
-            query.isBlank() -> RecentSessions(sessions, onOpen = { selectedSession = it })
+            query.isBlank() -> Column {
+                ModelMemoryBudget()
+                Spacer(Modifier.height(12.dp))
+                RecentSessions(sessions, onOpen = { selectedSession = it })
+            }
             else -> SearchResults(convResults, expResults, factResults)
         }
     }
@@ -364,3 +372,108 @@ private fun EmptyState(text: String) {
 
 private fun timeOf(epochMs: Long): String =
     SimpleDateFormat("dd MMM HH:mm", Locale.getDefault()).format(Date(epochMs))
+
+
+/**
+ * Per-component memory budget bars (golden UX P3): weights (measured from
+ * the largest local GGUF), KV cache (estimated at the configured context),
+ * graph scratch and SQLite (fixed profile constants) against the hard
+ * 1536 MB ceiling. Only the largest local model is shown; values are
+ * labeled measured vs estimate, never fabricated.
+ */
+@Composable
+private fun ModelMemoryBudget(nCtx: Int = 2048) {
+    val context = LocalContext.current
+    var modelFile by remember { mutableStateOf<File?>(null) }
+    LaunchedEffect(Unit) {
+        modelFile = withContext(Dispatchers.IO) {
+            val dir = File(context.filesDir, "models")
+            if (dir.isDirectory) {
+                dir.listFiles { f ->
+                    f.isFile && f.name.endsWith(".gguf", ignoreCase = true) && !f.name.endsWith(".tmp")
+                }?.maxByOrNull { it.length() }
+            } else {
+                null
+            }
+        }
+    }
+    val f = modelFile ?: return
+    val meta = GgufMetaCache.metaFor(f)
+    val budget = remember(f, nCtx) {
+        MemoryBudget.estimate(
+            modelBytes = f.length(),
+            nCtx = nCtx,
+            layers = meta?.layers,
+            hiddenDim = meta?.embeddingDim,
+        )
+    }
+    val cap = budget.limitMb.toDouble().coerceAtLeast(1.0)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = OpCard,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, OpBorder),
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Text(
+                "MEMORY BUDGET \u00b7 ${f.name}",
+                color = OpTextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "measured file ${budget.weightsMb.toInt()} MB \u00b7 KV est @${nCtx} ctx",
+                color = OpTextSecondary,
+                fontSize = 10.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            BudgetRow("weights", budget.weightsMb, cap, "measured", OpStatusInfo)
+            BudgetRow("KV cache", budget.kvCacheMb, cap, "estimated", OpStatusWarn)
+            BudgetRow("graph", budget.graphMb, cap, "fixed", OpStatusInfo)
+            BudgetRow("sqlite", budget.sqliteMb, cap, "fixed", OpStatusInfo)
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "TOTAL ${budget.totalMb.toInt()} / ${budget.limitMb} MB",
+                    color = if (budget.withinLimit) OpStatusSuccess else OpStatusDanger,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (budget.withinLimit) "WITHIN CAP" else "EXCEEDS CAP",
+                    color = if (budget.withinLimit) OpStatusSuccess else OpStatusDanger,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BudgetRow(label: String, mb: Double, capMb: Double, source: String, color: androidx.compose.ui.graphics.Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label.uppercase(),
+            color = OpTextSecondary,
+            fontSize = 10.sp,
+            modifier = Modifier.width(64.dp),
+        )
+        LinearProgressIndicator(
+            progress = { (mb / capMb).toFloat().coerceIn(0f, 1f) },
+            modifier = Modifier.weight(1f),
+            color = color,
+            trackColor = OpDivider,
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "${mb.toInt()} MB \u00b7 $source",
+            color = OpTextSecondary,
+            fontSize = 10.sp,
+        )
+    }
+    Spacer(Modifier.height(6.dp))
+}
+

@@ -14,6 +14,7 @@ class ProviderHealthMonitor(
         var consecutiveFailures: Int = 0,
         var lastFailureAt: Long = 0,
         var lastError: String = "",
+        var lastLatencyMs: Long? = null,
     )
 
     private val statuses = ConcurrentHashMap<String, Status>()
@@ -21,6 +22,16 @@ class ProviderHealthMonitor(
     fun reportSuccess(providerId: String) {
         statuses.remove(providerId)
     }
+
+    /** Measured end-to-end provider latency (first byte -> done). */
+    fun reportLatency(providerId: String, latencyMs: Long) {
+        if (latencyMs < 0) return
+        val s = statuses.getOrPut(providerId) { Status() }
+        s.lastLatencyMs = latencyMs
+    }
+
+    /** Most recent measured latency, or null when nothing was measured. */
+    fun latencyMs(providerId: String): Long? = statuses[providerId]?.lastLatencyMs
 
     fun reportFailure(providerId: String, error: String = "") {
         val s = statuses.getOrPut(providerId) { Status() }

@@ -22,10 +22,12 @@ class ContextManager(
         memory: String,
         observations: List<String>,
         sources: String = "",
+        conversation: String = "",
     ): String {
         val obs = observations.toMutableList()
         var memoryCtx = memory.takeUnless { it.isBlank() } ?: ""
         var sourcesCtx = sources.takeUnless { it.isBlank() } ?: ""
+        var conversationCtx = conversation.takeUnless { it.isBlank() } ?: ""
 
         fun render(): String = buildString {
             append(system).append("\n\n").append(user)
@@ -34,6 +36,9 @@ class ContextManager(
             }
             if (sourcesCtx.isNotBlank()) {
                 append("\n\nRelevant sources:\n").append(sourcesCtx)
+            }
+            if (conversationCtx.isNotBlank()) {
+                append("\n\nPrior conversation:\n").append(conversationCtx)
             }
             if (obs.isNotEmpty()) {
                 append("\n\nObservations:\n").append(obs.joinToString("\n"))
@@ -44,6 +49,7 @@ class ContextManager(
         while (estimateTokens(text) > budgetTokens) {
             when {
                 obs.isNotEmpty() -> obs.removeAt(0) // oldest observation first
+                conversationCtx.isNotBlank() -> conversationCtx = ""
                 memoryCtx.isNotBlank() -> memoryCtx = ""
                 sourcesCtx.isNotBlank() -> sourcesCtx = ""
                 else -> {

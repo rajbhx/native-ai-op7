@@ -30,4 +30,13 @@ class SkillManager(private val registry: SkillRegistry = SkillRegistry()) {
     fun get(id: String): Skill? = registry.get(id)
 
     fun descriptions(): String = registry.descriptions()
+
+    /** Delete a user skill (registry + storage). Built-ins are read-only:
+     *  they re-seed when the list is empty and are never removed. */
+    fun delete(id: String): Boolean {
+        val skill = registry.get(id) ?: return false
+        if (skill.builtin) return false
+        registry.remove(id)
+        return storage?.delete(id) ?: true
+    }
 }

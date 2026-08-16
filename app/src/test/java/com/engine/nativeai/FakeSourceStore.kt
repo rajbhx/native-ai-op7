@@ -51,6 +51,9 @@ class FakeSourceStore : SourceStore {
 
     override fun chunkById(id: Long): SourceChunk? = chunks.values.flatten().firstOrNull { it.id == id }
 
+    override fun chunksForFile(fileId: Long): List<SourceChunk> =
+        (chunks[fileId] ?: emptyList()).sortedBy { it.chunkIndex }
+
     override fun upsertSourceFile(f: SourceFile): Long {
         val list = files.getOrPut(f.sourceId) { mutableListOf() }
         val existing = list.firstOrNull { it.path == f.path }

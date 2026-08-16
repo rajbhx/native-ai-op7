@@ -69,6 +69,13 @@ class LocalModelLibrary(private val modelsDir: File) {
      * `local-llama` placeholder descriptor when no GGUF is installed so the
      * LOCAL section stays visible (backward compat with the original model).
      */
+    /** Total bytes of all local GGUF files (measured, for storage UI). */
+    fun storageUsedBytes(): Long =
+        if (!modelsDir.isDirectory) 0L
+        else modelsDir.listFiles { f ->
+            f.isFile && f.name.endsWith(".gguf", ignoreCase = true) && !f.name.endsWith(".tmp")
+        }?.sumOf { it.length() } ?: 0L
+
     fun syncInto(
         registry: ModelRegistry,
         engine: NativeEngine,

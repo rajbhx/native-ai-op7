@@ -30,7 +30,7 @@ data class LoRAEligibility(
 class SelfLearningPipeline(
     private val memory: MemoryDatabase,
     private val trainingDir: File,
-    private val minPairs: Int = 100,
+    val minPairs: Int = 100,
 ) {
 
     /** Export verified experiences as JSONL {"prompt","completion"} pairs. */

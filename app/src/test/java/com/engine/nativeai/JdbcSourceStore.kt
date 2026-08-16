@@ -115,6 +115,15 @@ class JdbcSourceStore(private val conn: Connection) : SourceStore {
             ps.executeQuery().use { rs -> if (rs.next()) rs.toSourceChunk() else null }
         }
 
+    override fun chunksForFile(fileId: Long): List<SourceChunk> =
+        conn.prepareStatement(
+            "SELECT * FROM source_chunks WHERE source_file_id = ? ORDER BY chunk_index ASC",
+        ).use { ps ->
+            ps.setLong(1, fileId); ps.executeQuery().use { rs ->
+                buildList { while (rs.next()) add(rs.toSourceChunk()) }
+            }
+        }
+
     override fun sourceFiles(sourceId: Long): List<SourceFile> =
         conn.prepareStatement("SELECT * FROM source_files WHERE source_id = ? ORDER BY path ASC").use { ps ->
             ps.setLong(1, sourceId); ps.executeQuery().use { rs ->

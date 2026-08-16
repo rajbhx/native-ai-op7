@@ -36,6 +36,14 @@ android {
         }
     }
 
+    testOptions {
+        unitTests {
+            // Robolectric needs Android resources on the unit-test classpath
+            // (test-only; never affects the APK).
+            isIncludeAndroidResources = true
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false // R8/validation gates arrive in phase 3
@@ -66,12 +74,18 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.9.0")
+    // Golden UX: configuration-change-safe run state (single authority).
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
 
     // Dev-time leak detection only: never shipped in release (observability ref).
     debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     testImplementation("org.json:json:20240303")
+    // Context-bound unit tests on the JVM (golden catalog: Robolectric).
+    testImplementation("org.robolectric:robolectric:4.12.2")
+    testImplementation("androidx.test:core:1.6.1")
     // JVM twin of the Android SQLite store for source KB tests (test-only;
     // does not affect the APK). Bundles FTS5 like modern platform SQLite.
     testImplementation("org.xerial:sqlite-jdbc:3.45.1.0")

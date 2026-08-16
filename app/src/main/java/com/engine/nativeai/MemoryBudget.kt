@@ -28,13 +28,15 @@ object MemoryBudget {
     fun estimate(
         modelBytes: Long,
         nCtx: Int,
-        layers: Int = 28,
-        hiddenDim: Int = 2048,
+        layers: Int? = null,
+        hiddenDim: Int? = null,
         kvElementBytes: Int = 1,
     ): Budget {
+        val layerCount = layers ?: MemoryPlanner.DEFAULT_LAYERS
+        val hidden = hiddenDim ?: MemoryPlanner.DEFAULT_HIDDEN_DIM
         val weightsMb = modelBytes / (1024.0 * 1024.0)
         // M_kv = 2 (K+V) * n_ctx * L * H * B_element
-        val kvCacheMb = 2.0 * nCtx * layers * hiddenDim * kvElementBytes / (1024.0 * 1024.0)
+        val kvCacheMb = 2.0 * nCtx * layerCount * hidden * kvElementBytes / (1024.0 * 1024.0)
         val graphMb = Op7SystemProfile.GGML_SCRATCH_MAX_MB.toDouble() // fixed scratch block
         val sqliteMb = Op7SystemProfile.SQLITE_FTS5_MAX_MB.toDouble()
         val totalMb = weightsMb + kvCacheMb + graphMb + sqliteMb

@@ -271,3 +271,148 @@ sections:
         cause: "no central failure surface"
         solution: "core ErrorLog (bounded cap 100, thread-safe) + process crash hook in NativeAiApp + CoreErrors; agent/generate/local-init/diagnostics/source record entries; ERRORS tab with count, CLEAR/REFRESH, expandable detail; ErrorLogTest covers order/cap/clear/truncation/null"
         tags: [error-log, observability, crash-hook, ui, errors-tab]
+      - id: A54
+        problem: "split-brain RAM ceiling: native rss_over_limit fired at 1500 MiB while the Kotlin watchdog/UI used 1536 MiB (1.5 GB)"
+        cause: "MemoryMonitor.cpp hardcoded 1572864000ULL (=1500 MiB) independently of Op7SystemProfile.MEMORY_LIMIT_BYTES (=1610612736 / 1536 MiB)"
+        solution: "single constexpr kOp7MemoryLimitBytes = 1610612736ULL in MemoryMonitor.hpp used by statsJson; contract pinned by MemoryBudgetTest.nativeCeilingMatchesKotlinSingleSourceOfTruth (SYSTEM-PARAMETERS.json max_total_runtime = 1536 is authoritative)"
+        tags: [memory, ceiling, cpp, kotlin, contract-test]
+      - id: A55
+        problem: "KV-cache estimate used 28 layers / 2048 hidden for every model, overestimating the shipped Qwen2.5-1B (24/1024) by ~2.3x and understating maxSafeNctx"
+        cause: "MemoryPlanner/MemoryBudget defaulted to 3B-class geometry and pre-flight runs before the model loads, so real geometry was never available"
+        solution: "GgufMetadataReader (strict GGUF v2/v3 header parse: architecture/block_count/embedding_length, null on any anomaly) + GgufMetaCache keyed by path/size/mtime; planner/budget take nullable layers/hiddenDim with labeled DEFAULT_LAYERS/DEFAULT_HIDDEN_DIM fallback; EngineScreen pre-flight passes measured values"
+        tags: [memory, gguf, metadata, planner, qwen1b, kv-cache]
+      - id: A56
+        problem: "accent red used for non-primary/non-error elements (status text, quick-download links, progress bar, picker selection/check/link)"
+        cause: "flat color tokens with no semantic roles; red was copy-pasted as the default accent"
+        solution: "semantic role tokens (OpPrimaryAction/OpStatusSuccess/OpStatusWarn/OpStatusInfo/OpStatusDanger/OpLinkAccent) in Theme.kt; remapped EngineScreen + ModelPicker so red = one primary action + danger only; picker filter chips now neutral outline/fill like ValuePill"
+        tags: [ux, color, tokens, red, hierarchy]
+      - id: A57
+        problem: "'Agent' button crash: run state lived in the composition; an uncaught exception killed the process"
+        cause: "run coroutine owned by EngineScreen; exceptions escaped to the process crash hook, not the ERROR surface"
+        solution: "EngineViewModel = single authority (one-way data flow); agent/generate/local-init exceptions caught, recorded to CoreErrors, surfaced in ERRORS tab + status"
+        tags: [viewmodel, crash, agent, error-log, state]
+      - id: A58
+        problem: "rotation/process death silently cancelled a run and wiped prompt/output/trace (~20 remember mutableStateOf slots)"
+        cause: "no state survival; rememberSaveable covered only two booleans"
+        solution: "EngineViewModel + StateFlow (prompt/output/answer/running/engineState/status/loaded/elapsed/lastRoute/pendingApproval); run lives in ViewModel scope, survives recreation"
+        tags: [viewmodel, stateflow, configuration-change, state]
+      - id: A59
+        problem: "no in-loop tool approval UX; REQUIRES_APPROVAL/PRIVILEGED tools were auto-denied with no consent path"
+        cause: "ToolExecutor decided alone and the UI never saw the request"
+        solution: "ToolApprovalRequest/ApprovalDecision + injected onApproval (default DENY); EngineViewModel suspends the run on pendingApproval, persists ALWAYS_ALLOW in toolAlwaysAllow; Allow once / Always / Deny dialog; PRIVILEGED stays policy-blocked"
+        tags: [tools, approval, permissions, consent]
+      - id: A60
+        problem: "no transient feedback: successes/failures only in a scrolling status line; destructive actions had no confirm"
+        cause: "no snackbar layer, no confirm dialogs"
+        solution: "UiEvent SharedFlow + SnackbarHost (Retry/Undo); confirm dialog for model deletion; PillButton loading spinner; Agent button becomes Stop while running"
+        tags: [snackbar, feedback, confirm, loading]
+      - id: A61
+        problem: "bottom sheet and prompt field sat under nav bar/keyboard on Android 10 gesture nav"
+        cause: "no imePadding, no adjustResize"
+        solution: "windowSoftInputMode=adjustResize on MainActivity + imePadding on screen root"
+        tags: [ime, insets, android-10, ux]
+      - id: A62
+        problem: "sub-48dp touch targets; header status was color-only"
+        cause: "text-based pills/chips with 5dp vertical padding; no semantics"
+        solution: "48dp min heights on PillButton/ValuePill/FilterChip; stateDescription + elapsed on header, liveRegion on status, contentDescription on send/clear/model chip"
+        tags: [accessibility, a11y, touch-target, semantics]
+      - id: A63
+        problem: "memory screen had no per-component budget visualization"
+        cause: "budget math existed (MemoryBudget) but only as a text line in settings"
+        solution: "ModelMemoryBudget card on Memory screen: weights (measured from largest local GGUF), KV (est @2048 ctx), graph/sqlite (fixed) bars vs 1536 MB cap, labeled measured vs estimate"
+        tags: [memory, budget, ui, bars]
+      - id: A64
+        problem: "agent/generate loops and model init ran on the Main thread (llama decode, HTTP readLine, JNI init) — UI jank during every run; RuntimeMetrics was also written from multiple contexts"
+        cause: "ViewModel scope used Dispatchers.Main.immediate and inherited it into run/collect/init; metrics object had plain fields"
+        solution: "runAgent/sendQuick launch on Dispatchers.Default (UI updates only via thread-safe StateFlows), ensureLocalLoaded wraps native init in withContext(Default), RuntimeMetrics methods @Synchronized (read from Main diagnostics, written off Main)"
+        tags: [threading, main-thread, stateflow, metrics]
+      - id: A65
+        problem: "model-load state was contradictory: header showed COMPLETED right after load (loading is not a task result), and a failed re-init left the stale loaded flag true"
+        cause: "ensureLocalLoaded set EngineUiState.COMPLETED on success and never cleared _loaded on failure"
+        solution: "success -> EngineUiState.READY; failure -> _loaded=false + loadedPath=null; native init off Main"
+        tags: [state, model-load, memory]
+      - id: A66
+        problem: "run-state races and semantics: double-send could start two runs (flag set inside the coroutine), runAgent had no running guard, stop() double-appended [STOPPED] (stop + the coroutine catch both wrote it), Clear did not reset engine state, primary Agent button was disabled while running so its Stop branch was dead code"
+        cause: "flags/status handled in two places (UI + VM) with no single owner"
+        solution: "sendQuick sets _running synchronously before launch; runAgent guards if (_running.value) return; stop() only cancels (coroutine catch owns [STOPPED]/status); clearRun resets engineState/status/lastRoute/elapsed; primary button toggles Agent<->Stop and stays enabled; Clear disabled while running"
+        tags: [state-machine, race, stop, clear, buttons]
+      - id: A67
+        problem: "no curated, license-checked source catalog mapped to the architecture layers"
+        cause: "references accumulated in chat history without ownership/license/fit analysis"
+        solution: "docs/GOLDEN-SOURCE-CATALOG.md — per-layer table (inference/memory/sources/terminal/observability/UI/test), each entry: what to take, license, OP7/1.5GB fit, status (IN/PARKED/CANDIDATE/REF); negative picks documented; adoption order for next phases"
+        tags: [catalog, sources, licensing, reference]
+      - id: A68
+        problem: "router health state was reset every run — each runAgent/sendQuick built a fresh ModelRouter with a new ProviderHealthMonitor, so repeated failures never accumulated and measured latency was ignored"
+        cause: "health monitor defaulted inside ModelRouter instead of being shared"
+        solution: "EngineViewModel owns one ProviderHealthMonitor; routers are constructed with it; reportLatency + reportSuccess/reportFailure recorded per run; router sort adds measured latency as tiebreak (nulls last, never fabricated)"
+        tags: [router, health, latency, state]
+      - id: A69
+        problem: "agent runs were single-shot: prior conversation was stored but never injected as context, and answers never cited which source KB hits were used"
+        cause: "ContextManager had no conversation section; AgentEvent.Final carried no sources"
+        solution: "ContextManager.build(conversation=...) with priority system > user > observations > conversation > memory > sources; ThinkingAgent.run(priorConversation=...) fed from the last session's tail; AgentEvent.Final.sources populated from source hits and rendered as SOURCE lines under the answer"
+        tags: [multi-turn, context, citations, sources]
+      - id: A70
+        problem: "model manager had no integrity: downloads only checked the GGUF magic, so a corrupted file could load and silently produce garbage; no storage accounting"
+        cause: "no checksum pipeline, no manifest"
+        solution: "ModelIntegrity (streaming SHA-256, IO) + ModelManifest (models/.manifest.json: sha256/bytes/url/ts) + downloader computes SHA-256 while streaming; ensureLocalLoaded refuses checksum mismatch; LocalModelLibrary.storageUsedBytes() drives a STORAGE line; manifest recorded on download and import"
+        tags: [integrity, sha256, manifest, model-manager]
+      - id: A71
+        problem: "skills were seeded but never wired: DefaultSkills/SkillManager existed with no consumer"
+        cause: "skill registry was created nowhere in the runtime graph"
+        solution: "Toolbox.skillManager (init from app files dir, seeds on first run); ThinkingAgent takes skills and appends the task-matched skill's workflow/constraints to the system prompt (deterministic skillFor(taskType), no model round-trip)"
+        tags: [skills, agent, system-prompt]
+      - id: A72
+        problem: "hybrid search plumbing (USearch + embeddings) was defined but never connected to SourceSearch, and there was no honest gate explaining why vectors stay off"
+        cause: "Toolbox built SourceSearch without vectorIndex/embeddingProvider"
+        solution: "Toolbox wires USearchVectorIndex(384) + MnnEmbeddingProvider (lib probe + model asset + EMBEDDING_GATE_PASSED); RRF merge activates only when both report available; docs/EMBEDDINGS.md documents model choice, conversion, placement, gate steps — no fake vector capability"
+        tags: [embeddings, hybrid, usearch, mnn, gating]
+      - id: A73
+        problem: "benchmark battery existed (ModelBenchmark) but had no UI; approval policy had no per-tool persistence UI"
+        cause: "benchmark and policy controls were not wired into Diagnostics/TOOL INVENTORY"
+        solution: "Diagnostics dialog gains Benchmark (per selected model, measured results); REQUIRES_APPROVAL tools get an ALWAYS toggle persisting toolAlwaysAllow"
+        tags: [benchmark, diagnostics, approval, ui]
+      - id: A74
+        problem: "memory only grew; low-utility entries were never pruned"
+        cause: "deleteLowUtilityMemories existed but nothing called it"
+        solution: "EngineViewModel prunes low-utility memories (threshold 0.05) after each completed agent run, best-effort, never failing the run"
+        tags: [memory, lifecycle, pruning]
+      - id: A75
+        problem: "cancelled/interrupted GGUF downloads discarded the partial file, so large models had to restart from zero"
+        cause: "ModelDownloader deleted .tmp on every failure path including cancel and network timeouts"
+        solution: "keep .tmp on cancel/IOException; next download() sends Range: bytes=N- and appends; SHA-256 replayed over existing bytes so the manifest checksum stays full-file; servers returning 200 (ignored Range) or 416 restart cleanly; UI shows 'paused — N MB cached; tap Download to resume' and a resume hint when a partial exists"
+        tags: [download, resume, range, integrity, ui]
+      - id: A76
+        problem: "the router could substitute a different model than the user's explicit selection without saying why"
+        cause: "routing decisions were silent; health errors were recorded but never surfaced in trace/status"
+        solution: "AgentEvent.Routed gains reason; ModelRouter.lastError(providerId); ThinkingAgent emits 'preferred X unavailable (why) — using Y'; trace logs a FALLBACK line and quick-completion status shows the same reason — no silent switching"
+        tags: [router, fallback, transparency, trace]
+      - id: A77
+        problem: "prompt was wiped on process death — only rotation survived"
+        cause: "ViewModel state lived purely in memory; only MainActivity used rememberSaveable for two booleans"
+        solution: "EngineViewModel takes SavedStateHandle (default arg keeps tests working) and persists the prompt key on set/clear; model selection already survives via prefs — golden UX P0 now covers process death"
+        tags: [state, survival, savedstate, viewmodel]
+      - id: A78
+        problem: "source chunks were never written into the HNSW vector index, so the hybrid search was search-only plumbing"
+        cause: "no chunk-id listing API and no ingest-time wiring; the embedding gate was always closed"
+        solution: "SourceStore.chunksForFile(fileId) (Android SQLite + JDBC twin + fake); SourceUpdater.indexChunksIfReady embeds + adds chunks at all five ingest paths only when index AND embedder report available (dormant until the EMBEDDINGS.md benchmark gate opens); ingest never fails on vector writes"
+        tags: [sources, embeddings, ingest, usearch, gating]
+      - id: A79
+        problem: "skills were wired into the agent but users had no way to manage them (Phase 10 UI missing)"
+        cause: "SkillManager/SkillStorage existed with no create/edit/delete surface and no built-in protection"
+        solution: "Skill gains a builtin flag (seeds read-only); SkillManager.delete refuses built-ins; ENGINE SETTINGS gains a SKILLS panel with SEEDED/CUSTOM badges, create/edit/delete via a small editor dialog (id/purpose/tools/workflow/constraints), JSON-persisted; empty list re-seeds defaults"
+        tags: [skills, ui, phase10, editor]
+      - id: A80
+        problem: "the verified learning dataset pipeline had no UI and no honest eligibility surfacing"
+        cause: "SelfLearningPipeline existed but nothing called it; minPairs was private"
+        solution: "Diagnostics gains 'Export dataset': runs export + dedupe + min-pair gate, shows dataset file/pairs/reason and LoRA eligibility reasons (never silently trains); minPairs made public for the report"
+        tags: [learning, dataset, diagnostics, eligibility]
+      - id: A81
+        problem: "Context-bound state (SharedPrefs) had no JVM test coverage"
+        cause: "no Robolectric in the test toolchain"
+        solution: "testImplementation Robolectric 4.12.2 + androidx.test:core + unitTests.includeAndroidResources; ModelPreferencesRobolectricTest covers selection/override/terminal persistence, null override semantics, favorites toggle — test-only, no APK impact"
+        tags: [testing, robolectric, prefs, ci]
+      - id: A82
+        problem: "the golden source catalog covered only 6 layers and lacked agent-tooling and build/CI references"
+        cause: "catalog grew from earlier prompts without the maintenance-phase lens"
+        solution: "catalog v3: sections 7 (agent/tooling patterns, REF-only) and 8 (build/CI/release) + new entries (mediapipe, tokenizers, commons-compress, readability, LocalAI, ollama, timber, curtains, coil, kotlinx-serialization, Tink, cache-fix, emulator-runner, fastlane, macrobenchmark); Robolectric marked IN; adoption order updated"
+        tags: [catalog, licensing, build, ci, reference]
