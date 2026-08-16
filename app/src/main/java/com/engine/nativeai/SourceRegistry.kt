@@ -20,7 +20,8 @@ class SourceRegistry(private val db: SourceStore) {
     )
 
     /** Idempotent seeding: only missing titles are added (first-run only). */
-    fun seed(entries: List<SeedSource>): Int {
+    fun seed(entries: List<SeedSource>, catalogVersion: Int = 1): Int {
+        pruneLegacySeeds(catalogVersion)
         var added = 0
         entries.forEach { e ->
             if (db.sourceByTitle(e.title) == null) {
@@ -41,6 +42,31 @@ class SourceRegistry(private val db: SourceStore) {
             }
         }
         return added
+    }
+
+    /**
+     * One-time upgrade cleanup: seed rows from an older catalog that are no
+     * longer in the catalog are removed so every install converges on the
+     * current seed set (FMHY + Playbook). Runs only when the stored catalog
+     * version is behind the shipped one; user-added rows are never touched.
+     * The legacy title list is intentionally one-release-only and is deleted
+     * with the next catalog bump.
+     */
+    private fun pruneLegacySeeds(catalogVersion: Int) {
+        val stored = db.metaGet(KEY_CATALOG_VERSION)?.toIntOrNull() ?: 0
+        // The legacy list is the v1 -> v2 diff; only valid when upgrading to a
+        // catalog that actually dropped those seeds.
+        if (catalogVersion < MIN_PRUNE_VERSION || stored >= catalogVersion) return
+        LEGACY_SEED_TITLES.forEach { title ->
+            db.sourceByTitle(title)?.let { db.deleteSource(it.id) }
+        }
+        db.metaSet(KEY_CATALOG_VERSION, catalogVersion.toString())
+    }
+
+    private companion object {
+        const val KEY_CATALOG_VERSION = "source_catalog_version"
+        const val MIN_PRUNE_VERSION = 2
+        val LEGACY_SEED_TITLES = setOf("Termux", "llama.cpp", "uBlock Origin", "MemPalace", "LiteRT")
     }
 
     fun addSource(s: Source): Long = db.saveSource(s)

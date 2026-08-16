@@ -1,6 +1,7 @@
 package com.engine.nativeai
 
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -82,6 +83,7 @@ class SourceUpdater(
                 SourceType.RAW_TEXT -> 0L
                 SourceType.LOCAL_FILE -> updateLocalFile(s, budgetBytes)
                 SourceType.DOCUMENT -> updateDocument(s, budgetBytes)
+                SourceType.SITE -> updateSiteSource(s, budgetBytes)
             }
             registry.touchRead(s.id)
             spent
@@ -168,6 +170,68 @@ class SourceUpdater(
         db.touchSourceWrite(s.id, null, resp.etag, resp.lastModified, SourceStatus.INDEXED, 1, body.size.toLong())
         return body.size.toLong()
     }
+
+    private suspend fun updateSiteSource(s: Source, budgetBytes: Long): Long {
+        val sitemapUrl = s.contentUrl ?: throw IllegalStateException("site source missing sitemap url")
+        val headers = buildMap {
+            s.etag?.let { put("If-None-Match", it) }
+            s.lastModified?.let { put("If-Modified-Since", it) }
+        }
+        val resp = fetcher.fetch(sitemapUrl, headers)
+        if (resp.notModified) {
+            db.touchSourceWrite(s.id, null, resp.etag ?: s.etag, resp.lastModified ?: s.lastModified,
+                SourceStatus.INDEXED, s.fileCount, s.sizeBytes)
+            return 0L
+        }
+        if (resp.status !in 200..299) throw IllegalStateException("HTTP ${resp.status} for sitemap")
+        val sitemapBody = resp.body ?: throw IllegalStateException("empty sitemap")
+        val urls = SitemapParser.parseUrls(String(sitemapBody, Charsets.UTF_8))
+        if (urls.isEmpty()) {
+            throw IllegalStateException("sitemap yielded no pages (flat <urlset> required)")
+        }
+        val existing = db.sourceFiles(s.id).associate { it.path to (it.blobSha ?: "") }
+        var bytes = 0L
+        for (url in urls) {
+            if (stopRequested) break
+            if (bytes >= budgetBytes) break
+            val pageResp = fetcher.fetch(url)
+            if (pageResp.status !in 200..299) continue // bad page: skip, keep source healthy
+            val page = pageResp.body ?: continue
+            if (page.size > SourceCapabilities.MAX_FILE_BYTES) continue
+            val path = siteFilePath(url)
+            if (!SourceChunker.shouldIngest(page, path)) continue
+            val marker = pageResp.etag ?: "sha-${sha256(page).take(16)}"
+            if (existing[path] == marker) continue // changed-blob-only re-chunking
+            val text = HtmlTextExtractor.toText(String(page, Charsets.UTF_8))
+            if (text.isBlank()) continue
+            val chunks = SourceChunker.chunk(text)
+            val fileId = db.upsertSourceFile(
+                SourceFile(id = 0, sourceId = s.id, path = path, blobSha = marker, sizeBytes = page.size.toLong()),
+            )
+            db.replaceSourceChunks(s.id, fileId, chunks)
+            bytes += page.size
+        }
+        val allFiles = db.sourceFiles(s.id)
+        if (allFiles.isEmpty()) {
+            throw IllegalStateException("no pages indexed from site")
+        }
+        db.touchSourceWrite(
+            s.id, null, resp.etag, resp.lastModified,
+            SourceStatus.INDEXED, allFiles.size, allFiles.sumOf { it.sizeBytes },
+        )
+        return bytes.coerceAtLeast(0L)
+    }
+
+    /** Stable per-page file path: host + path, ".html" suffix when none. */
+    private fun siteFilePath(url: String): String {
+        val bare = url.removePrefix("https://").removePrefix("http://")
+        val path = bare.substringBefore('#').substringBefore('?')
+        return if (path.contains('.')) path else "$path.html"
+    }
+
+    private fun sha256(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { "%02x".format(java.util.Locale.US, it.toInt() and 0xff) }
 
     private suspend fun updateDocument(s: Source, budgetBytes: Long): Long {
         val extractor = textExtractor

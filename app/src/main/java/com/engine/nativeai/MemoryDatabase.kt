@@ -172,7 +172,7 @@ class MemoryDatabase(context: Context) :
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         // Real migrations only — never drop user data. v3->v4 keeps every
         // existing table and adds the source knowledge base.
-        if (oldVersion < 4) createSourceSchema(db)
+        if (oldVersion < 5) createSourceSchema(db)
     }
 
     // ------------------------------------------------------------------
@@ -590,6 +590,21 @@ class MemoryDatabase(context: Context) :
 
     /** uBO-style read-time LRU eviction: drop least-recently-read sources. */
     @Synchronized
+    @Synchronized
+    override fun metaGet(key: String): String? =
+        readableDatabase.rawQuery(
+            "SELECT value FROM source_meta WHERE key = ?", arrayOf(key),
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+
+    @Synchronized
+    override fun metaSet(key: String, value: String) {
+        writableDatabase.execSQL(
+            "INSERT INTO source_meta(key, value) VALUES(?, ?) " +
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            arrayOf(key, value),
+        )
+    }
+
     override fun evictSources(keep: Int): Int {
         val db = writableDatabase
         val total = db.rawQuery("SELECT COUNT(*) FROM sources", null).use { c ->

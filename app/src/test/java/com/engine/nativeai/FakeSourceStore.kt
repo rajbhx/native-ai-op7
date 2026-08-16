@@ -32,6 +32,13 @@ class FakeSourceStore : SourceStore {
         return id
     }
 
+    val meta = mutableMapOf<String, String>()
+
+    override fun metaGet(key: String): String? = meta[key]
+    override fun metaSet(key: String, value: String) {
+        meta[key] = value
+    }
+
     override fun deleteSource(id: Long) {
         sources.removeAll { it.id == id }
         files.remove(id)

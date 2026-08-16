@@ -108,4 +108,14 @@ class SourceStoreJdbcTest {
         assertTrue(hits.isNotEmpty())
         assertEquals("notes", hits[0].sourceTitle)
     }
+    @Test
+    fun metaKeyValueRoundTrip() {
+        val store = JdbcSourceStore.open(createFts = false)
+        assertEquals(null, store.metaGet("source_catalog_version"))
+        store.metaSet("source_catalog_version", "2")
+        store.metaSet("source_catalog_version", "3")
+        assertEquals("3", store.metaGet("source_catalog_version"))
+        assertEquals(null, store.metaGet("missing"))
+    }
+
 }

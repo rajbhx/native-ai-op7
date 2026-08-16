@@ -13,7 +13,22 @@ class SourceSeedLoader(private val context: Context) {
         emptyList() // missing/broken seed asset must never crash the app
     }
 
+    /** Catalog version read from the same asset (drives one-time seed pruning). */
+    fun catalogVersion(): Int = try {
+        val text = context.assets.open("sources.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        parseVersion(text)
+    } catch (e: Exception) {
+        1 // unreadable asset: behave like the pre-versioning catalog
+    }
+
     companion object {
+        /** Missing/blank version defaults to 1 (the first shipped catalog). */
+        fun parseVersion(text: String): Int = try {
+            JSONObject(text).optInt("version", 1).coerceAtLeast(1)
+        } catch (e: Exception) {
+            1
+        }
+
         /** Malformed/blank input must never throw: empty catalog, honest state. */
         fun parse(text: String): List<SourceRegistry.SeedSource> {
             return try {

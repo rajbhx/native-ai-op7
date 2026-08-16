@@ -1,20 +1,11 @@
 {
-  "version": 1,
+  "version": 2,
   "sources": [
     {
-      "collection": "Android",
-      "title": "Termux",
-      "type": "GITHUB_REPO",
-      "owner": "termux",
-      "repo": "termux-app",
-      "updateAfterHours": 24
-    },
-    {
-      "collection": "AI",
-      "title": "llama.cpp",
-      "type": "GITHUB_REPO",
-      "owner": "ggerganov",
-      "repo": "llama.cpp",
+      "collection": "Knowledge",
+      "title": "FMHY",
+      "type": "SITE",
+      "contentUrl": "https://fmhy.net/sitemap.xml",
       "updateAfterHours": 24
     },
     {
@@ -24,30 +15,6 @@
       "owner": "rajbhx",
       "repo": "op7-special-build-playbook",
       "updateAfterHours": 12
-    },
-    {
-      "collection": "Knowledge",
-      "title": "uBlock Origin",
-      "type": "GITHUB_REPO",
-      "owner": "gorhill",
-      "repo": "uBlock",
-      "updateAfterHours": 48
-    },
-    {
-      "collection": "Knowledge",
-      "title": "MemPalace",
-      "type": "GITHUB_REPO",
-      "owner": "MemPalace",
-      "repo": "mempalace",
-      "updateAfterHours": 48
-    },
-    {
-      "collection": "Knowledge",
-      "title": "FMHY",
-      "type": "GITHUB_REPO",
-      "owner": "fmhy",
-      "repo": "FMHY",
-      "updateAfterHours": 24
     }
   ]
 }

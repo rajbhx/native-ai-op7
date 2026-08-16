@@ -48,4 +48,38 @@ class SourceSeedLoaderTest {
         assertTrue(SourceSeedLoader.parse("not json").isEmpty())
         assertTrue(SourceSeedLoader.parse("{}").isEmpty())
     }
+    private val v2 = """
+        {
+          "version": 2,
+          "sources": [
+            {"collection": "Knowledge", "title": "FMHY", "type": "SITE",
+             "contentUrl": "https://fmhy.net/sitemap.xml", "updateAfterHours": 24},
+            {"collection": "My Projects", "title": "OP7 Special Build Playbook", "type": "GITHUB_REPO",
+             "owner": "rajbhx", "repo": "op7-special-build-playbook", "updateAfterHours": 12}
+          ]
+        }
+    """.trimIndent()
+
+    @Test
+    fun v2CatalogIsFmhyAndPlaybookOnly() {
+        val seeds = SourceSeedLoader.parse(v2)
+        assertEquals(listOf("FMHY", "OP7 Special Build Playbook"), seeds.map { it.title })
+        val fmhy = seeds.first { it.title == "FMHY" }
+        assertEquals(SourceType.SITE, fmhy.type)
+        assertEquals("https://fmhy.net/sitemap.xml", fmhy.contentUrl)
+        assertEquals("Knowledge", fmhy.collection)
+        assertEquals(24, fmhy.updateAfterHours)
+        val playbook = seeds.first { it.title == "OP7 Special Build Playbook" }
+        assertEquals("rajbhx", playbook.owner)
+        assertEquals("op7-special-build-playbook", playbook.repo)
+    }
+
+    @Test
+    fun catalogVersionParsedWithDefaultOne() {
+        assertEquals(2, SourceSeedLoader.parseVersion(v2))
+        assertEquals(1, SourceSeedLoader.parseVersion("{\"version\": 1, \"sources\": []}"))
+        assertEquals(1, SourceSeedLoader.parseVersion(""))
+        assertEquals(1, SourceSeedLoader.parseVersion("not json"))
+    }
+
 }

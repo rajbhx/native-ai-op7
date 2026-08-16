@@ -31,4 +31,6 @@ interface SourceStore {
     fun markSourceError(sourceId: Long, message: String)
     fun evictSources(keep: Int): Int
     fun searchSources(query: String, limit: Int): List<SourceSearchHit>
+    fun metaGet(key: String): String?
+    fun metaSet(key: String, value: String)
 }
