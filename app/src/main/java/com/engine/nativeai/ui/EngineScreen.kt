@@ -796,6 +796,7 @@ fun EngineScreen(
         Spacer(Modifier.height(8.dp))
         if (errorsExpanded) {
             ErrorLogView(
+                modifier = Modifier.weight(1f),
                 entries = errorEntries,
                 detailId = errorDetailId,
                 onToggleDetail = { errorDetailId = if (errorDetailId == it) null else it },
@@ -2228,6 +2229,7 @@ private val QUICK_MODELS = listOf(
 
 @Composable
 private fun ErrorLogView(
+    modifier: Modifier = Modifier,
     entries: List<ErrorEntry>,
     detailId: Long?,
     onToggleDetail: (Long) -> Unit,
@@ -2235,9 +2237,8 @@ private fun ErrorLogView(
     onRefresh: () -> Unit,
 ) {
     Column(
-        Modifier
+        modifier
             .fillMaxWidth()
-            .weight(1f)
             .background(OpCard, RoundedCornerShape(12.dp)),
     ) {
         Row(
