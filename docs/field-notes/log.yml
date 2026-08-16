@@ -255,3 +255,19 @@ sections:
         cause: "roadmap listed vectors but no runtime or gate existed"
         solution: "vendored USearch v2.11.3 headers + vector-lib + USearchVectorIndex (bounded/persisted) + EmbeddingProvider seam; hybrid BM25+HNSW RRF dormant until the benchmark gate passes"
         tags: [usearch, vector, hybrid, gating]
+
+      - id: A51
+        problem: "Stats/Diagnostics crashed the app: UnsatisfiedLinkError, JNI export did not match the Kotlin companion object"
+        cause: "nativeSelfTest() lives in USearchVectorIndex.Companion, so the export needs Java_com_engine_nativeai_USearchVectorIndex_00024Companion_nativeSelfTest; plain name left an uncaught NoSuchMethodError in the composable"
+        solution: "renamed the export, fail-closed selfTest() via runCatching, and wrapped MNN+VECT diagnostics probes in runCatching with a CoreErrors record - Diagnostics can never crash again"
+        tags: [jni, crash, diagnostics, usearch, companion-object]
+      - id: A52
+        problem: "Sources seed rows errored with 'coroutine scope left the composition' after navigation"
+        cause: "composition-scoped LaunchedEffect updateOnce() gets CancellationException on leave, caught as a normal failure"
+        solution: "SourceUpdater rethrows CancellationException (cancel != source error, next cycle retries clean); real failures recorded to CoreErrors"
+        tags: [coroutines, cancellation, sources, state]
+      - id: A53
+        problem: "handled failures only set a scrolling status string; uncaught crashes killed the process with no in-app trace"
+        cause: "no central failure surface"
+        solution: "core ErrorLog (bounded cap 100, thread-safe) + process crash hook in NativeAiApp + CoreErrors; agent/generate/local-init/diagnostics/source record entries; ERRORS tab with count, CLEAR/REFRESH, expandable detail; ErrorLogTest covers order/cap/clear/truncation/null"
+        tags: [error-log, observability, crash-hook, ui, errors-tab]
