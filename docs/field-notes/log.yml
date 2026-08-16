@@ -451,3 +451,38 @@ sections:
         cause: "EngineScreen.kt:505 literal"
         solution: "chip now reads SD855 6-8 GB; README + spec already correct"
         tags: [hardware, golden-standard, ui, spec]
+      - id: A90
+        problem: "agent fallback silently swapped the user's model kind: a failed local pick could be replaced by a free remote (whose anonymous rate-limit error then appeared as if the user chose it)"
+        cause: "ThinkingAgent fallback called router.route(task, registry, excludeIds) with no kind preference; ModelRouter had no preferKind seam; sendQuick showed raw provider errors"
+        solution: "ModelRouter.route gained preferKind (same-kind candidates tried first, full pool only when none remain); ThinkingAgent passes the failed model's kind and always emits an honest Routed(reason); VM translates known provider errors (rate-limit/401/timeout/network) into actionable text"
+        tags: [router, agent, fallback, error-handling, golden-standard]
+      - id: A91
+        problem: "web_search was a stub (LocalFallbackProvider) but the TOOL INVENTORY rendered AVAILABLE — a fake capability"
+        cause: "ToolRegistry.snapshot() only reflected AgentTool.available (default true); WebSearchTool never gated on a configured provider"
+        solution: "SearchProvider.configured (default true, fallback false); WebSearchTool.available = configured with unavailableReason; AgentTool/ToolDescriptor gained unavailableReason; inventory shows NOT CONFIGURED + reason line; web_search additionally reports OFFLINE when the network is down"
+        tags: [tools, web-search, honest-state, ui]
+      - id: A92
+        problem: "no real follow-up continuity: every send started a new session, answers were only saved on AgentEvent.Final, and stopped/failed runs broke the thread"
+        cause: "EngineViewModel created a fresh session per run and ended it in finally; sendQuick never persisted; priorConversation read recentMessages() in DESC order"
+        solution: "one activeSessionId reused by sendQuick + runAgent (Clear closes it = new conversation); exchange saved on success, error and stop; MemoryDatabase.conversationTail() returns chronological order for prior-turn context"
+        tags: [memory, sessions, continuity, agent, ux]
+      - id: A93
+        problem: "user had no choice where memory/models live; paths were hardcoded to filesDir"
+        cause: "MemoryDatabase('memory.db') fixed to app-private databases dir; EngineScreen/MainActivity hardcoded filesDir/models; no SAF path picker"
+        solution: "StoragePaths (dataDir/modelsDir/catalogFile/memoryDbPath/treeToAppPath/label) is the single resolution point; prefs gained dataDirOverride/modelsDirOverride; ENGINE SETTINGS → STORAGE rows with Internal/External/Pick (OpenDocumentTree, app-scoped only — scoped-storage honesty); models-dir changes apply live (library rebuild + VM re-attach), data-dir changes require restart (DB opened at startup)"
+        tags: [storage, scoped-storage, saf, prefs, settings]
+      - id: A94
+        problem: "sources were metadata-only: rows had Refresh/Delete but no way to read the indexed knowledge"
+        cause: "SourcesScreen rendered SourceRow without content access; search hits were not clickable"
+        solution: "View button on every source row + clickable KNOWLEDGE HITS → SourceViewerDialog (file list, expandable chunks with show-more, copy-all); SourceStore gained sourceFileById (MemoryDatabase + JdbcSourceStore twin)"
+        tags: [sources, knowledge-base, ui, reader]
+      - id: A95
+        problem: "GGUF manual import showed only a text status, no progress or failure toast"
+        cause: "LocalModelImporter existed but EngineScreen didn't surface fraction or snackbar errors"
+        solution: "importProgress Float? drives a LinearProgressIndicator; unknown-size imports show (unknown size); failures notify via snackbar; success message points to Load Model"
+        tags: [import, gguf, progress, ux]
+      - id: A96
+        problem: "TOOL INVENTORY was static and disconnected from offline/online + model state"
+        cause: "snapshot() rendered once; no network/termux overlay"
+        solution: "live toolRows recomputed on network/termux/selection/models-dir changes; networkOnline refreshed every 3s while the settings sheet is open; web_search → NOT CONFIGURED/OFFLINE, terminal reasons surfaced via unavailableReason"
+        tags: [tools, inventory, offline, connectivity, ui]

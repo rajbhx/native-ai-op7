@@ -129,16 +129,15 @@ class JdbcSourceStore(private val conn: Connection) : SourceStore {
             ps.setLong(1, sourceId); ps.executeQuery().use { rs ->
                 buildList {
                     while (rs.next()) {
-                        add(
-                            SourceFile(
-                                id = rs.getLong("id"), sourceId = rs.getLong("source_id"),
-                                path = rs.getString("path"), blobSha = rs.getString("blob_sha"),
-                                chunked = rs.getInt("chunked") == 1, sizeBytes = rs.getLong("size_bytes"),
-                            ),
-                        )
+                        add(rs.toSourceFile())
                     }
                 }
             }
+        }
+
+    override fun sourceFileById(id: Long): SourceFile? =
+        conn.prepareStatement("SELECT * FROM source_files WHERE id = ?").use { ps ->
+            ps.setLong(1, id); ps.executeQuery().use { rs -> if (rs.next()) rs.toSourceFile() else null }
         }
 
     override fun upsertSourceFile(f: SourceFile): Long {
@@ -312,6 +311,15 @@ class JdbcSourceStore(private val conn: Connection) : SourceStore {
         error = getString("error"),
         fileCount = getInt("file_count"),
         lastUpdated = getLong("last_updated"),
+        sizeBytes = getLong("size_bytes"),
+    )
+
+    private fun ResultSet.toSourceFile(): SourceFile = SourceFile(
+        id = getLong("id"),
+        sourceId = getLong("source_id"),
+        path = getString("path"),
+        blobSha = getString("blob_sha"),
+        chunked = getInt("chunked") == 1,
         sizeBytes = getLong("size_bytes"),
     )
 

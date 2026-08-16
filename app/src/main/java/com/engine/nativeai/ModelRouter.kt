@@ -18,6 +18,7 @@ class ModelRouter(
         registry: ModelRegistry,
         excludeIds: Set<String> = emptySet(),
         preferredId: String? = null,
+        preferKind: ModelKind? = null,
     ): ModelDescriptor? {
         val candidates = registry.list().filter { d ->
             d.id !in excludeIds &&
@@ -57,54 +58,72 @@ class ModelRouter(
                     .thenBy { healthMonitor.latencyMs(it.id) ?: Long.MAX_VALUE })
                 .firstOrNull()
 
-        when (mode) {
+        fun pickFrom(
+            l: List<ModelDescriptor>,
+            fr: List<ModelDescriptor>,
+            pr: List<ModelDescriptor>,
+        ): ModelDescriptor? = when (mode) {
             RoutingMode.OFFLINE_ONLY ->
-                return pick(local)
+                pick(l)
 
             RoutingMode.FREE_ONLY -> {
                 // Free remote models first, then local. Paid models are
                 // never selected automatically in this mode.
                 if (task.networkAvailable) {
-                    pick(freeRemote)?.let { return it }
+                    pick(fr)?.let { return it }
                 }
-                pick(local)?.let { return it }
-                return null
+                pick(l)?.let { return it }
+                null
             }
 
             RoutingMode.LOCAL_FIRST -> {
-                pick(local)?.let { return it }
-                pick(freeRemote)?.let { return it }
-                if (task.allowPaid) pick(paidRemote)?.let { return it }
-                return null
+                pick(l)?.let { return it }
+                pick(fr)?.let { return it }
+                if (task.allowPaid) pick(pr)?.let { return it }
+                null
             }
 
             RoutingMode.FREE_FIRST -> {
                 if (task.networkAvailable) {
-                    pick(freeRemote)?.let { return it }
+                    pick(fr)?.let { return it }
                 }
-                pick(local)?.let { return it }
-                if (task.allowPaid) pick(paidRemote)?.let { return it }
-                return null
+                pick(l)?.let { return it }
+                if (task.allowPaid) pick(pr)?.let { return it }
+                null
             }
 
             RoutingMode.HYBRID -> {
-                val localMaxCtx = local.maxOfOrNull { it.contextLength ?: 0 } ?: 0
+                val localMaxCtx = l.maxOfOrNull { it.contextLength ?: 0 } ?: 0
                 val localCapable = localMaxCtx >= task.contextLength &&
                     task.requiredCapabilities.none { it == ModelCapability.VISION }
                 val simpleEnough = task.taskType in simpleTasks ||
                     task.taskType == TaskType.CHAT ||
                     !task.networkAvailable
                 if (task.preferLocal || simpleEnough || localCapable) {
-                    pick(local)?.let { return it }
+                    pick(l)?.let { return it }
                 }
                 if (task.networkAvailable) {
-                    pick(freeRemote)?.let { return it }
+                    pick(fr)?.let { return it }
                 }
-                pick(local)?.let { return it }
-                if (task.allowPaid) pick(paidRemote)?.let { return it }
-                return null
+                pick(l)?.let { return it }
+                if (task.allowPaid) pick(pr)?.let { return it }
+                null
             }
         }
+
+        // Fallback from a failed model must preserve the user's intent: the
+        // agent passes the failed model's kind so a local pick stays local
+        // and a remote pick stays remote. Only when no same-kind candidate
+        // survives does the router open the full pool — and the agent always
+        // emits an honest Routed(reason) when a substitution happens.
+        if (preferKind != null) {
+            pickFrom(
+                l = if (preferKind == ModelKind.LOCAL) local else emptyList(),
+                fr = if (preferKind == ModelKind.REMOTE) freeRemote else emptyList(),
+                pr = if (preferKind == ModelKind.REMOTE) paidRemote else emptyList(),
+            )?.let { return it }
+        }
+        return pickFrom(local, freeRemote, paidRemote)
     }
 
     fun reportSuccess(providerId: String) = healthMonitor.reportSuccess(providerId)

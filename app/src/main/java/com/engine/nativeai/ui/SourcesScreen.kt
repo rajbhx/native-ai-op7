@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -13,8 +14,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,13 +43,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.engine.nativeai.MemoryDatabase
+import com.engine.nativeai.ModelPreferencesStore
+import com.engine.nativeai.StoragePaths
 import com.engine.nativeai.Source
 import com.engine.nativeai.SourceCapabilities
+import com.engine.nativeai.SourceChunk
+import com.engine.nativeai.SourceFile
 import com.engine.nativeai.SourceChunker
 import com.engine.nativeai.SourceCollection
 import com.engine.nativeai.SourceRegistry
@@ -70,9 +80,11 @@ import kotlinx.coroutines.withContext
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SourcesScreen(onBack: () -> Unit) {
+fun SourcesScreen(onBack: () -> Unit, prefs: ModelPreferencesStore? = null) {
     val context = LocalContext.current
-    val db = remember { MemoryDatabase(context.applicationContext) }
+    val db = remember {
+        MemoryDatabase(context.applicationContext, StoragePaths.memoryDbPath(context.applicationContext, prefs))
+    }
     val registry = remember {
         val loader = SourceSeedLoader(context.applicationContext)
         SourceRegistry(db).apply { seed(loader.load(), loader.catalogVersion()) }
@@ -88,7 +100,32 @@ fun SourcesScreen(onBack: () -> Unit) {
     var running by remember { mutableStateOf(false) }
     var statusLine by remember { mutableStateOf("") }
     var showAdd by remember { mutableStateOf(false) }
+    var viewerSource by remember { mutableStateOf<Source?>(null) }
+    var viewerFileId by remember { mutableStateOf<Long?>(null) }
     var refreshTick by remember { mutableStateOf(0) }
+
+    // P5: open a source (from its row or from a knowledge hit) and read the
+    // indexed chunks locally — sources are readable knowledge, not metadata.
+    fun openSource(s: Source, fileId: Long?) {
+        viewerSource = s
+        viewerFileId = fileId
+    }
+
+    fun openHit(hit: SourceSearchHit) {
+        scope.launch {
+            val target = withContext(Dispatchers.IO) {
+                val chunk = db.chunkById(hit.chunkId)
+                val file = chunk?.let { db.sourceFileById(it.sourceFileId) }
+                val s = file?.let { db.sourceById(it.sourceId) }
+                if (s != null) s to file.id else null
+            }
+            if (target != null) {
+                openSource(target.first, target.second)
+            } else {
+                statusLine = "Could not open the hit \u2014 chunk metadata missing; re-index the source."
+            }
+        }
+    }
 
     LaunchedEffect(refreshTick) {
         withContext(Dispatchers.IO) {
@@ -228,7 +265,7 @@ fun SourcesScreen(onBack: () -> Unit) {
             } else {
                 LazyColumn {
                     items(hits) { hit ->
-                        SourceHitRow(hit)
+                        SourceHitRow(hit, onClick = { openHit(hit) })
                     }
                 }
             }
@@ -250,6 +287,7 @@ fun SourcesScreen(onBack: () -> Unit) {
                         is Source -> SourceRow(
                             row, running,
                             onRefresh = { id -> refreshOne(id) },
+                            onView = { openSource(row, null) },
                             onDelete = {
                                 scope.launch {
                                     withContext(Dispatchers.IO) { registry.removeSource(row.id) }
@@ -271,6 +309,15 @@ fun SourcesScreen(onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    viewerSource?.let { s ->
+        SourceViewerDialog(
+            source = s,
+            db = db,
+            initialFileId = viewerFileId,
+            onDismiss = { viewerSource = null; viewerFileId = null },
+        )
     }
 
     if (showAdd) {
@@ -349,6 +396,7 @@ private fun SourceRow(
     s: Source,
     running: Boolean,
     onRefresh: (Long) -> Unit,
+    onView: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val statusColor = when (s.status) {
@@ -395,6 +443,15 @@ private fun SourceRow(
             Spacer(Modifier.height(8.dp))
             Row {
                 OutlinedButton(
+                    onClick = onView,
+                    border = BorderStroke(1.dp, OpDivider),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(30.dp),
+                ) {
+                    Text("View", color = OpStatusInfo, fontSize = 11.sp)
+                }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(
                     onClick = { onRefresh(s.id) },
                     enabled = !running,
                     border = BorderStroke(1.dp, OpDivider),
@@ -418,14 +475,16 @@ private fun SourceRow(
 }
 
 @Composable
-private fun SourceHitRow(hit: SourceSearchHit) {
+private fun SourceHitRow(hit: SourceSearchHit, onClick: () -> Unit) {
     Surface(
         color = OpCard,
         shape = RoundedCornerShape(12.dp),
         border = BorderStroke(1.dp, OpDivider),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
     ) {
         Column(Modifier.padding(12.dp)) {
             Text(
@@ -436,6 +495,8 @@ private fun SourceHitRow(hit: SourceSearchHit) {
             )
             Spacer(Modifier.height(4.dp))
             Text(hit.content, color = OpTextSecondary, fontSize = 12.sp)
+            Spacer(Modifier.height(4.dp))
+            Text("tap to open the source", color = OpStatusInfo, fontSize = 9.sp)
         }
     }
 }
@@ -590,4 +651,139 @@ private fun ago(ts: Long): String {
         mins < 1440 -> "${mins / 60}h ago"
         else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(ts))
     }
+}
+
+
+/** P5: read the indexed chunks of a source locally. Files are expandable,
+ *  chunked reads are capped with "show more", and the open file can be
+ *  copied — sources are readable knowledge, not opaque metadata. */
+@Composable
+private fun SourceViewerDialog(
+    source: Source,
+    db: MemoryDatabase,
+    initialFileId: Long?,
+    onDismiss: () -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    var files by remember(source.id) { mutableStateOf<List<SourceFile>>(emptyList()) }
+    var expandedFile by remember(source.id) { mutableStateOf(initialFileId) }
+    var chunks by remember { mutableStateOf<List<SourceChunk>>(emptyList()) }
+    var chunkPage by remember { mutableStateOf(10) }
+    var copyStatus by remember { mutableStateOf("") }
+
+    LaunchedEffect(source.id) {
+        withContext(Dispatchers.IO) { files = db.sourceFiles(source.id) }
+    }
+    LaunchedEffect(expandedFile) {
+        chunks = emptyList()
+        chunkPage = 10
+        if (expandedFile != null) {
+            withContext(Dispatchers.IO) { chunks = db.chunksForFile(expandedFile!!) }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = OpBg,
+        title = {
+            Column {
+                Text(source.title, color = OpText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text(typeLine(source), color = OpTextSecondary, fontSize = 10.sp)
+            }
+        },
+        text = {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                if (files.isEmpty()) {
+                    Text(
+                        "No indexed files yet \u2014 refresh the source first.",
+                        color = OpTextSecondary,
+                        fontSize = 12.sp,
+                    )
+                } else {
+                    files.forEach { f ->
+                        Surface(
+                            color = OpCard,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, OpDivider),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp),
+                        ) {
+                            Column(Modifier.padding(8.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        f.path,
+                                        color = OpText,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    TextButton(
+                                        onClick = {
+                                            expandedFile = if (expandedFile == f.id) null else f.id
+                                        },
+                                    ) {
+                                        Text(
+                                            if (expandedFile == f.id) "hide" else "read",
+                                            color = OpStatusInfo,
+                                            fontSize = 10.sp,
+                                        )
+                                    }
+                                }
+                                if (expandedFile == f.id) {
+                                    if (chunks.isEmpty()) {
+                                        Text(
+                                            "No chunks for this file.",
+                                            color = OpTextSecondary,
+                                            fontSize = 11.sp,
+                                        )
+                                    } else {
+                                        Text(
+                                            chunks.take(chunkPage).joinToString("\n") { it.content },
+                                            color = OpTextSecondary,
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                        )
+                                        Row {
+                                            if (chunks.size > chunkPage) {
+                                                TextButton(onClick = { chunkPage += 10 }) {
+                                                    Text(
+                                                        "show ${chunks.size - chunkPage} more chunks",
+                                                        color = OpStatusInfo,
+                                                        fontSize = 10.sp,
+                                                    )
+                                                }
+                                            }
+                                            TextButton(
+                                                onClick = {
+                                                    clipboard.setText(
+                                                        AnnotatedString(chunks.joinToString("\n") { it.content }),
+                                                    )
+                                                    copyStatus = "copied ${chunks.size} chunks"
+                                                },
+                                            ) {
+                                                Text("copy all", color = OpStatusInfo, fontSize = 10.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (copyStatus.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(copyStatus, color = OpTextSecondary, fontSize = 10.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close", color = OpTextSecondary) }
+        },
+    )
 }

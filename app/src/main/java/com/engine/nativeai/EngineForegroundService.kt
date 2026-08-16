@@ -60,8 +60,14 @@ class EngineForegroundService : Service() {
         try {
             if (engine == null) {
                 engine = NativeEngine()
-                memory = MemoryDatabase(this)
-                training = SelfLearningPipeline(memory!!, File(filesDir, "training"))
+                memory = MemoryDatabase(
+                    this,
+                    StoragePaths.memoryDbPath(this, ModelPreferences(this)),
+                )
+                training = SelfLearningPipeline(
+                    memory!!,
+                    File(StoragePaths.dataDir(this, ModelPreferences(this)), "training"),
+                )
                 watchdog = MemoryWatchdog(engine!!)
                 scope.launch { watchdogLoop() }
             }

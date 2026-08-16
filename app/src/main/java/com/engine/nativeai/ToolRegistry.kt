@@ -8,6 +8,7 @@ data class ToolDescriptor(
     val permission: ToolPermission,
     val available: Boolean,
     val enabled: Boolean,
+    val unavailableReason: String? = null,
 ) {
     val riskLevel: String
         get() = when (permission) {
@@ -38,6 +39,7 @@ class ToolRegistry {
                 permission = t.permission,
                 available = t.available,
                 enabled = t.enabled,
+                unavailableReason = t.unavailableReason,
             )
         }
 

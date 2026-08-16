@@ -31,4 +31,20 @@ class WebSearchToolTest {
         }
         assertFalse(WebSearchTool(provider).execute("q").ok)
     }
+
+    @Test
+    fun localFallbackReportsNotConfigured() {
+        val tool = WebSearchTool(LocalFallbackProvider())
+        assertFalse(tool.available)
+        assertTrue(tool.unavailableReason?.contains("configured") == true)
+    }
+
+    @Test
+    fun configuredProviderMarksToolAvailable() {
+        val provider = object : SearchProvider {
+            override suspend fun search(query: String) = SearchResult("ok", ok = true)
+        }
+        assertTrue(WebSearchTool(provider).available)
+        assertTrue(WebSearchTool(provider).unavailableReason == null)
+    }
 }

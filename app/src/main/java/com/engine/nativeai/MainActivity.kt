@@ -27,11 +27,13 @@ class MainActivity : ComponentActivity() {
         // Automation/test hook: seed the prompt field via
         // am start ... --es prompt "text" (avoids flaky IME injection).
         val initialPrompt = intent?.getStringExtra("prompt")
-        val localLibrary = LocalModelLibrary(File(filesDir, "models"))
         val providerRegistry = ProviderRegistry()
         val prefs = ModelPreferences(this)
+        // One storage resolution point (golden: models dir, catalog and the
+        // memory DB must never disagree about where user data lives).
+        val localLibrary = LocalModelLibrary(StoragePaths.modelsDir(this, prefs))
         providerRegistry.setBaseUrl(ModelCatalog.ZEN_PROVIDER, prefs.zenBaseUrl)
-        val registry = ModelRegistry(File(filesDir, "models/catalog.json")).apply {
+        val registry = ModelRegistry(StoragePaths.catalogFile(this, prefs)).apply {
             localLibrary.syncInto(
                 this,
                 engine,
@@ -57,8 +59,8 @@ class MainActivity : ComponentActivity() {
                     showSources = false
                 }
                 when {
-                    showMemory -> MemoryScreen(onBack = { showMemory = false })
-                    showSources -> SourcesScreen(onBack = { showSources = false })
+                    showMemory -> MemoryScreen(onBack = { showMemory = false }, prefs = prefs)
+                    showSources -> SourcesScreen(onBack = { showSources = false }, prefs = prefs)
                     else -> EngineScreen(
                         engine = engine,
                         registry = registry,

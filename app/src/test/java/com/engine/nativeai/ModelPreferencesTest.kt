@@ -42,4 +42,21 @@ class ModelPreferencesTest {
         assertFalse(p.isFavorite("big-pickle"))
         assertEquals(setOf("deepseek-v4-flash-free"), p.favorites())
     }
+
+    @Test
+    fun storageOverridesDefaultNullAndPersist() {
+        val p = InMemoryModelPreferences()
+        assertNull(p.dataDirOverride)
+        assertNull(p.modelsDirOverride)
+
+        p.dataDirOverride = "/data/user/0/com.engine.nativeai/files"
+        p.modelsDirOverride = "/storage/emulated/0/Android/data/com.engine.nativeai/files/models"
+        assertEquals("/data/user/0/com.engine.nativeai/files", p.dataDirOverride)
+        assertEquals("/storage/emulated/0/Android/data/com.engine.nativeai/files/models", p.modelsDirOverride)
+
+        p.dataDirOverride = null
+        p.modelsDirOverride = null
+        assertNull(p.dataDirOverride)
+        assertNull(p.modelsDirOverride)
+    }
 }

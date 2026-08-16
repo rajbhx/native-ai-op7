@@ -105,6 +105,31 @@ arm64-v8a only. **Builds run on GitHub Actions, never locally.**
   refresh; hit titles stay neutral.
 - Source catalog: `docs/GOLDEN-SOURCE-CATALOG.md`.
 
+## Interconnected golden fix (current)
+- **Honest fallback**: `ModelRouter.route(preferKind=…)` keeps a failed
+  model's kind (local stays local, remote stays remote) before opening the
+  full pool; the agent always emits a `Routed(reason)` on substitution, and
+  the VM translates rate-limit / 401 / timeout / network errors into
+  actionable text — no silent remote swap, no raw "generate failed".
+- **Continuity**: `sendQuick` and `runAgent` share one open session
+  (`activeSessionId`); Clear starts a new conversation. The exchange is
+  saved on success, error and stop, and `conversationTail()` feeds
+  chronological prior turns into follow-ups.
+- **Storage choice (scoped-storage honest)**: `StoragePaths` is the single
+  resolution point; ENGINE SETTINGS → STORAGE lets the user pick Internal /
+  External / SAF-folder (app-scoped only — no fake "any folder" on Android
+  10+ scoped storage). Models-dir changes apply live, data-dir changes need
+  a restart (DB opens at startup).
+- **Sources readable**: every source row has View, KNOWLEDGE HITS open the
+  indexed chunks (`SourceViewerDialog` with show-more + copy), backed by
+  `SourceStore.sourceFileById`.
+- **GGUF import UX**: progress bar (with unknown-size fallback), snackbar
+  errors, success points to Load Model.
+- **Live tool inventory**: tool rows recompute on network / termux /
+  selection / storage changes — web_search shows NOT CONFIGURED or OFFLINE,
+  terminal shows backend reasons; the UI can never display a stale
+  AVAILABLE.
+
 ## Pinned dependency
 - `third_party/llama.cpp` — submodule pinned to release **b10428** (`885c5bb`),
   shallow. Native code is written ONLY against the API in that exact checkout

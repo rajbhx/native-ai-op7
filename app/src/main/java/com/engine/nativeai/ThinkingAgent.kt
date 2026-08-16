@@ -157,17 +157,29 @@ class ThinkingAgent(
                         emit(AgentEvent.Error("provider ${descriptor.id} failed after $attempts attempts: ${e.message}"))
                         return@flow
                     }
-                    val fallback = router.route(task, registry, excludeIds = setOf(descriptor.id))
+                    val failedId = descriptor.id
+                    val fallback = router.route(
+                        task, registry,
+                        excludeIds = setOf(failedId),
+                        preferKind = descriptor.kind,
+                    )
                     if (fallback == null) {
                         emit(AgentEvent.Error("no fallback model available: ${e.message}"))
                         return@flow
                     }
                     descriptor = fallback
-                    provider = registry.providerFor(descriptor) ?: continue
-                    val routedReason = if (preferredId != null && descriptor.id != preferredId) {
-                        val why = router.lastError(preferredId).ifEmpty { "not available in mode ${router.mode}" }
-                        "preferred $preferredId unavailable ($why) \u2014 using ${descriptor.id}"
-                    } else ""
+                    provider = registry.providerFor(descriptor)
+                    if (provider == null) {
+                        emit(AgentEvent.Error("provider for ${descriptor.id} not registered"))
+                        return@flow
+                    }
+                    val routedReason = buildString {
+                        if (preferredId != null && preferredId != descriptor.id) {
+                            val why = router.lastError(preferredId).ifEmpty { "not available in mode ${router.mode}" }
+                            append("preferred $preferredId unavailable ($why) \u2014 ")
+                        }
+                        append("$failedId failed; using ${descriptor.id}")
+                    }
                     emit(
                         AgentEvent.Routed(
                             descriptor.id, descriptor.provider, descriptor.costTier, taskType,

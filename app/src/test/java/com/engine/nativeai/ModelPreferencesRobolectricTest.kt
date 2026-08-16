@@ -44,4 +44,22 @@ class ModelPreferencesRobolectricTest {
         prefs.toggleFavorite("local-llama")
         assertTrue(ModelPreferences(ApplicationProvider.getApplicationContext()).favorites().isEmpty())
     }
+
+    @Test
+    fun storageOverridesRoundTripThroughSharedPrefs() {
+        val prefs = ModelPreferences(ApplicationProvider.getApplicationContext())
+        prefs.dataDirOverride = "/data/user/0/com.engine.nativeai/files"
+        prefs.modelsDirOverride = "/storage/emulated/0/Android/data/com.engine.nativeai/files/models"
+
+        val fresh = ModelPreferences(ApplicationProvider.getApplicationContext())
+        assertEquals("/data/user/0/com.engine.nativeai/files", fresh.dataDirOverride)
+        assertEquals(
+            "/storage/emulated/0/Android/data/com.engine.nativeai/files/models",
+            fresh.modelsDirOverride,
+        )
+
+        // null clears (remove key, not an empty string)
+        fresh.dataDirOverride = null
+        assertNull(fresh.dataDirOverride)
+    }
 }

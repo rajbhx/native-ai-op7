@@ -16,8 +16,8 @@ import kotlinx.coroutines.withContext
  * memory stays bounded and privacy-safe (gold-standard spec §8-10).
  * Hybrid retrieval: FTS5/BM25 candidates -> utility + recency ranking -> Top-K.
  */
-class MemoryDatabase(context: Context) :
-    SQLiteOpenHelper(context, "memory.db", null, SCHEMA_VERSION),
+class MemoryDatabase(context: Context, dbPath: String = "memory.db") :
+    SQLiteOpenHelper(context, dbPath, null, SCHEMA_VERSION),
     SourceStore {
 
     /** False when the platform SQLite lacks the FTS5 module (seen on OP7/OxygenOS
@@ -282,6 +282,15 @@ class MemoryDatabase(context: Context) :
         ).use { c -> buildList { while (c.moveToNext()) add(c.toMessage()) } }
     }
 
+    /** Conversation tail in chronological order (oldest first) — the exact
+     *  shape the agent needs for follow-up context. */
+    @Synchronized
+    fun conversationTail(sessionId: Long, limit: Int = 12): List<Message> =
+        readableDatabase.rawQuery(
+            "SELECT * FROM messages WHERE session_id = ? ORDER BY created ASC, id ASC LIMIT ?",
+            arrayOf(sessionId.toString(), limit.toString()),
+        ).use { c -> buildList { while (c.moveToNext()) add(c.toMessage()) } }
+
     @Synchronized
     fun endSession(id: Long) {
         writableDatabase.execSQL(
@@ -510,6 +519,11 @@ class MemoryDatabase(context: Context) :
             "SELECT * FROM source_files WHERE source_id = ? ORDER BY path ASC",
             arrayOf(sourceId.toString()),
         ).use { c -> buildList { while (c.moveToNext()) add(c.toSourceFile()) } }
+
+    override fun sourceFileById(id: Long): SourceFile? =
+        readableDatabase.rawQuery(
+            "SELECT * FROM source_files WHERE id = ?", arrayOf(id.toString()),
+        ).use { c -> if (c.moveToFirst()) c.toSourceFile() else null }
 
     @Synchronized
     override fun upsertSourceFile(f: SourceFile): Long {

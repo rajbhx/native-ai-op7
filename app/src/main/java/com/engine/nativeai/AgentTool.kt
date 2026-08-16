@@ -15,6 +15,9 @@ interface AgentTool {
     val description: String
     val available: Boolean
         get() = true
+    /** Human reason when available=false (shown in the tool inventory). */
+    val unavailableReason: String?
+        get() = null
     val enabled: Boolean
         get() = true
     /** Backend tag for the trace (e.g. "termux"/"local"); null when not a backend tool. */

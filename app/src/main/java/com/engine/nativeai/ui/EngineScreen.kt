@@ -154,6 +154,7 @@ import com.engine.nativeai.NativeEngine
 import com.engine.nativeai.RoutingMode
 import com.engine.nativeai.RuntimeDiagnostics
 import com.engine.nativeai.DiagnosticsSnapshot
+import com.engine.nativeai.StoragePaths
 import com.engine.nativeai.SystemInfoTool
 import com.engine.nativeai.TaskType
 import com.engine.nativeai.TerminalTool
@@ -166,6 +167,7 @@ import com.engine.nativeai.WebSearchTool
 import java.io.File
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -188,9 +190,15 @@ fun EngineScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val downloadTarget = remember { File(context.filesDir, "models/model.gguf") }
-    val modelsDir = remember { File(context.filesDir, "models") }
-    var localModels by remember { mutableStateOf(localLibrary.scan()) }
+    // One storage resolution point (P4): the models dir follows the user's
+    // chosen override; downloads, imports, the library and the catalog all
+    // agree on the same directory. Keying on modelsDirVersion makes a
+    // mid-session override take effect without an app restart.
+    var modelsDirVersion by remember { mutableStateOf(0) }
+    val modelsDir = remember(modelsDirVersion) { StoragePaths.modelsDir(context, prefs) }
+    val downloadTarget = remember(modelsDir) { File(modelsDir, "model.gguf") }
+    var library by remember { mutableStateOf(localLibrary) }
+    var localModels by remember { mutableStateOf(library.scan()) }
 
     val vm: EngineViewModel = viewModel()
     // Metrics live in the VM so accumulated measurements survive rotation.
@@ -253,7 +261,7 @@ fun EngineScreen(
     // Attach once per ViewModel lifetime: the VM owns run state so rotation
     // never loses prompt/output/trace/state, and runs survive recreation.
     LaunchedEffect(Unit) {
-        vm.attach(engine, context, localLibrary, registry, prefs, toolbox)
+        vm.attach(engine, context, library, registry, prefs, toolbox)
         if (vm.prompt.value.isBlank() && !initialPrompt.isNullOrBlank()) vm.setPrompt(initialPrompt)
         if (vm.status.value.isBlank()) {
             vm.setStatus(
@@ -302,6 +310,9 @@ fun EngineScreen(
         errorEntries = CoreErrors.log.all()
     }
     var termuxStatus by remember { mutableStateOf(executionManager.status()) }
+    // Live connectivity for the tool inventory — offline tools report OFFLINE,
+    // never a stale AVAILABLE (P2: no fake capabilities).
+    var networkOnline by remember { mutableStateOf(hasNetwork(context)) }
     var termuxReason by remember { mutableStateOf(executionManager.statusReason()) }
     var terminalEnabled by remember { mutableStateOf(prefs.terminalEnabled) }
     var allowlistText by remember {
@@ -312,6 +323,14 @@ fun EngineScreen(
     val downloadCancel = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var importing by remember { mutableStateOf(false) }
     var importStatus by remember { mutableStateOf("") }
+    var importProgress by remember { mutableStateOf<Float?>(null) }
+    var dataDirLabel by remember {
+        mutableStateOf(StoragePaths.label(context, prefs, StoragePaths.dataDir(context, prefs)))
+    }
+    var modelsDirLabel by remember {
+        mutableStateOf(StoragePaths.label(context, prefs, StoragePaths.modelsDir(context, prefs)))
+    }
+    var storageError by remember { mutableStateOf("") }
     var showDiagnostics by remember { mutableStateOf(false) }
     var diagnosticsSnapshot by remember { mutableStateOf<DiagnosticsSnapshot?>(null) }
     var benchmarkLines by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -325,26 +344,33 @@ fun EngineScreen(
     var trainingExportLines by remember { mutableStateOf<List<String>>(emptyList()) }
     var exportingTraining by remember { mutableStateOf(false) }
     val trainingPipeline = remember {
-        SelfLearningPipeline(toolbox.memory, File(context.filesDir, "training"))
+        SelfLearningPipeline(toolbox.memory, File(StoragePaths.dataDir(context, prefs), "training"))
     }
     var firstRunDismissed by remember { mutableStateOf(prefs.firstRunDismissed) }
-    val importer = remember { LocalModelImporter(modelsDir) }
+    val importer = remember(modelsDir) { LocalModelImporter(modelsDir) }
     val pickLocalLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri != null) {
             scope.launch {
+                importProgress = null
                 importing = true
                 importStatus = "copying\u2026"
                 val result = importer.import(
                     resolver = context.contentResolver,
                     uri = uri,
                     onProgress = { done, total ->
+                        importProgress = if (total != null && total > 0) {
+                            (done.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                        } else {
+                            null
+                        }
                         importStatus = "copying ${done / (1024 * 1024)} MB" +
-                            (total?.let { " / ${it / (1024 * 1024)} MB" } ?: "")
+                            (total?.let { " / ${it / (1024 * 1024)} MB" } ?: " (unknown size)")
                     },
                 )
                 importing = false
+                importProgress = null
                 when (result) {
                     is ImportResult.Success -> {
                         val importedSha = ModelIntegrity.sha256(result.file) ?: ""
@@ -354,8 +380,8 @@ fun EngineScreen(
                             importedSha,
                             result.file.length(),
                         )
-                        localModels = localLibrary.scan()
-                        localLibrary.syncInto(
+                        localModels = library.scan()
+                        library.syncInto(
                             registry,
                             engine,
                             context.applicationInfo.nativeLibraryDir,
@@ -365,13 +391,47 @@ fun EngineScreen(
                         selectedModelId = entry?.id ?: LocalModelProvider.LOCAL_MODEL_ID
                         prefs.lastSelectedModelId = selectedModelId
                         vm.setStatus("Imported ${result.file.name} \u2014 tap Load Model")
-                        vm.notify("Imported ${result.file.name}")
+                        vm.notify("Imported ${result.file.name} \u2014 now select it and tap Agent")
                     }
                     is ImportResult.Error -> {
                         importStatus = "failed: ${result.message}"
                         vm.setStatus("import failed: ${result.message}")
+                        vm.notify("GGUF import failed: ${result.message}")
                     }
                 }
+            }
+        }
+    }
+
+    // Storage pickers (P4): OpenDocumentTree + scoped-storage validation.
+    // Only app-writable roots are accepted; anything else is an honest error.
+    val pickDataDirLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            val path = StoragePaths.treeToAppPath(context, uri)
+            if (path == null) {
+                storageError = "This folder is outside the app's writable storage (scoped storage). Use Internal or External."
+            } else {
+                prefs.dataDirOverride = path
+                dataDirLabel = StoragePaths.label(context, prefs, File(path))
+                storageError = ""
+                vm.notify("Data directory changed \u2014 restart the app to apply")
+            }
+        }
+    }
+    val pickModelsDirLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            val path = StoragePaths.treeToAppPath(context, uri)
+            if (path == null) {
+                storageError = "This folder is outside the app's writable storage (scoped storage). Use Internal or External."
+            } else {
+                prefs.modelsDirOverride = path
+                modelsDirLabel = StoragePaths.label(context, prefs, File(path))
+                storageError = ""
+                modelsDirVersion++
             }
         }
     }
@@ -418,6 +478,24 @@ fun EngineScreen(
 
     // Auto health: one live check (60s cache) for the active remote model so
     // the card never shows a stale/static quota state (C3).
+    LaunchedEffect(modelsDirVersion) {
+        val dir = StoragePaths.modelsDir(context, prefs)
+        val fresh = LocalModelLibrary(dir)
+        library = fresh
+        localModels = fresh.scan()
+        fresh.syncInto(registry, engine, context.applicationInfo.nativeLibraryDir, contextSize)
+        // The VM resolves local files through the library — re-point it so a
+        // storage change applies to quick completion and agent runs too.
+        vm.attach(engine, context, fresh, registry, prefs, toolbox)
+    }
+
+    LaunchedEffect(showSettingsSheet) {
+        while (showSettingsSheet) {
+            networkOnline = hasNetwork(context)
+            delay(3000)
+        }
+    }
+
     LaunchedEffect(selectedModelId) {
         val d = registry.list().firstOrNull { it.id == selectedModelId }
             ?: return@LaunchedEffect
@@ -447,7 +525,7 @@ fun EngineScreen(
     val models = registry.list()
     val selected = models.firstOrNull { it.id == selectedModelId }
     val selectedLocalFile: File? = selected?.takeIf { it.kind == ModelKind.LOCAL }
-        ?.let { localLibrary.resolve(it.id) }
+        ?.let { library.resolve(it.id) }
     val (connText, connColor) = when {
         selected == null -> "select a model" to OpAmber
         selected.kind == ModelKind.LOCAL ->
@@ -576,6 +654,15 @@ fun EngineScreen(
         )
         if (importing) {
             Text(importStatus, color = OpAmber, fontSize = 11.sp)
+            importProgress?.let { p ->
+                Spacer(Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { p },
+                    color = OpRed,
+                    trackColor = OpBorder,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
         if (models.isEmpty() && localModels.isEmpty() && !firstRunDismissed) {
             Column(
@@ -990,6 +1077,55 @@ fun EngineScreen(
                 }
                 Spacer(Modifier.height(12.dp))
 
+                Text("STORAGE", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Where models, memory, vectors and skills live. Data-directory changes apply after restart; models-directory changes apply immediately.",
+                    color = OpTextSecondary,
+                    fontSize = 10.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+                StorageRow(
+                    title = "DATA DIRECTORY",
+                    subtitle = "memory.db · vectors · skills",
+                    label = dataDirLabel,
+                    onInternal = {
+                        prefs.dataDirOverride = null
+                        dataDirLabel = StoragePaths.label(context, prefs, StoragePaths.dataDir(context, prefs))
+                        storageError = ""
+                        vm.notify("Data directory set to internal \u2014 restart the app to apply")
+                    },
+                    onExternal = {
+                        prefs.dataDirOverride = StoragePaths.externalRoot(context)?.absolutePath
+                        dataDirLabel = StoragePaths.label(context, prefs, StoragePaths.dataDir(context, prefs))
+                        storageError = ""
+                        vm.notify("Data directory set to external \u2014 restart the app to apply")
+                    },
+                    onPick = { pickDataDirLauncher.launch(null) },
+                )
+                Spacer(Modifier.height(6.dp))
+                StorageRow(
+                    title = "MODELS DIRECTORY",
+                    subtitle = "GGUF files · manifest · catalog",
+                    label = modelsDirLabel,
+                    onInternal = {
+                        prefs.modelsDirOverride = null
+                        modelsDirLabel = StoragePaths.label(context, prefs, StoragePaths.modelsDir(context, prefs))
+                        storageError = ""
+                        modelsDirVersion++
+                    },
+                    onExternal = {
+                        prefs.modelsDirOverride = File(context.getExternalFilesDir(null), "models").absolutePath
+                        modelsDirLabel = StoragePaths.label(context, prefs, StoragePaths.modelsDir(context, prefs))
+                        storageError = ""
+                        modelsDirVersion++
+                    },
+                    onPick = { pickModelsDirLauncher.launch(null) },
+                )
+                if (storageError.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(storageError, color = OpRed, fontSize = 10.sp)
+                }
                 Spacer(Modifier.height(12.dp))
 
                 Text("SYSTEM PROMPT", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -1116,12 +1252,28 @@ fun EngineScreen(
                 Spacer(Modifier.height(10.dp))
                 Text("TOOL INVENTORY", color = OpTextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
-                toolbox.tools.snapshot().forEach { td ->
+                // Live inventory: network/termux/model state overlays the tool
+                // registry so the UI can never show a fake AVAILABLE (P2).
+                val toolRows = remember(toolbox, networkOnline, termuxStatus, selectedModelId, modelsDirVersion) {
+                    toolbox.tools.snapshot().map { td ->
+                        when (td.id) {
+                            "web_search" -> td.copy(
+                                available = td.available && networkOnline,
+                                unavailableReason = when {
+                                    !networkOnline -> "network offline"
+                                    !td.available -> td.unavailableReason ?: "no provider configured"
+                                    else -> null
+                                },
+                            )
+                            else -> td
+                        }
+                    }
+                }
+                toolRows.forEach { td ->
+                    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp),
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
                             td.name,
@@ -1133,7 +1285,7 @@ fun EngineScreen(
                         Text(
                             when {
                                 !td.enabled -> "DISABLED"
-                                !td.available -> "UNAVAILABLE"
+                                !td.available -> if (td.unavailableReason != null) "NOT CONFIGURED" else "UNAVAILABLE"
                                 td.permission == ToolPermission.REQUIRES_APPROVAL -> "APPROVAL"
                                 td.permission == ToolPermission.PRIVILEGED -> "PRIVILEGED"
                                 else -> "AVAILABLE"
@@ -1160,6 +1312,15 @@ fun EngineScreen(
                                 )
                             }
                         }
+                        }
+                    if (!td.available && td.unavailableReason != null) {
+                        Text(
+                            td.unavailableReason,
+                            color = OpTextSecondary,
+                            fontSize = 9.sp,
+                            modifier = Modifier.padding(start = 4.dp, top = 1.dp),
+                        )
+                    }
                     }
                 }
 
@@ -1281,7 +1442,7 @@ fun EngineScreen(
                     fontSize = 10.sp,
                 )
                 Text(
-                    "STORAGE \u00b7 ${localLibrary.storageUsedBytes() / (1024L * 1024L)} MB used",
+                    "STORAGE \u00b7 ${library.storageUsedBytes() / (1024L * 1024L)} MB used",
                     color = OpTextSecondary,
                     fontSize = 10.sp,
                 )
@@ -1411,8 +1572,8 @@ fun EngineScreen(
                                 result.bytes,
                                 url = url,
                             )
-                            localModels = localLibrary.scan()
-                            localLibrary.syncInto(
+                            localModels = library.scan()
+                            library.syncInto(
                                 registry,
                                 engine,
                                 context.applicationInfo.nativeLibraryDir,
@@ -1504,9 +1665,9 @@ fun EngineScreen(
                 TextButton(onClick = {
                     deleteTarget = null
                     scope.launch {
-                        if (localLibrary.delete(d.id)) {
-                            localModels = localLibrary.scan()
-                            localLibrary.syncInto(
+                        if (library.delete(d.id)) {
+                            localModels = library.scan()
+                            library.syncInto(
                                 registry,
                                 engine,
                                 context.applicationInfo.nativeLibraryDir,
@@ -1639,6 +1800,45 @@ fun EngineScreen(
             onShare = { text -> shareText(context, text) },
             onDismiss = { showDiagnostics = false },
         )
+    }
+}
+
+/** One storage row in ENGINE SETTINGS: current location + preset/pick actions. */
+@Composable
+private fun StorageRow(
+    title: String,
+    subtitle: String,
+    label: String,
+    onInternal: () -> Unit,
+    onExternal: () -> Unit,
+    onPick: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(OpCard, RoundedCornerShape(10.dp))
+            .border(BorderStroke(1.dp, OpDivider), RoundedCornerShape(10.dp))
+            .padding(10.dp),
+    ) {
+        Text(title, color = OpText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Text(subtitle, color = OpTextSecondary, fontSize = 10.sp)
+        Spacer(Modifier.height(4.dp))
+        Text(label, color = OpStatusInfo, fontSize = 10.sp)
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth()) {
+            PillButton("Internal", Modifier.weight(1f), enabled = true) { onInternal() }
+            Spacer(Modifier.width(6.dp))
+            PillButton("External", Modifier.weight(1f), enabled = true) { onExternal() }
+            Spacer(Modifier.width(6.dp))
+            OutlinedButton(
+                onClick = onPick,
+                border = BorderStroke(1.dp, OpBorder),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                modifier = Modifier.height(34.dp),
+            ) {
+                Text("Pick…", color = OpTextSecondary, fontSize = 11.sp)
+            }
+        }
     }
 }
 

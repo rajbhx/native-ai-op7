@@ -18,7 +18,12 @@ class Toolbox(
     companion object {
         const val EMBEDDING_DIMENSIONS = 384
     }
-    val memory: MemoryDatabase = MemoryDatabase(context)
+    private val dataDir = StoragePaths.dataDir(context, prefs)
+
+    val memory: MemoryDatabase = MemoryDatabase(
+        context,
+        File(dataDir, "memory.db").absolutePath,
+    )
     val sources: SourceRegistry = SourceRegistry(memory).apply {
         seed(SourceSeedLoader(context).load()) // uBO-style default catalog, first-run only
     }
@@ -27,10 +32,10 @@ class Toolbox(
     // benchmark), so SourceSearch stays BM25-only until then — never faked.
     val vectorIndex: VectorIndex = USearchVectorIndex(
         dimensions = EMBEDDING_DIMENSIONS,
-        store = File(context.filesDir, "vectors/vectors.usearch"),
+        store = File(dataDir, "vectors/vectors.usearch"),
     )
     val embeddingProvider: EmbeddingProvider = MnnEmbeddingProvider(
-        modelFile = File(context.filesDir, "models/embeddings/embedding.mnn"),
+        modelFile = File(dataDir, "models/embeddings/embedding.mnn"),
     )
     val sourceSearch: SourceSearch = SourceSearch(
         memory,
@@ -38,7 +43,7 @@ class Toolbox(
         embeddingProvider = embeddingProvider,
     )
     val skillManager: SkillManager = SkillManager().apply {
-        init(File(context.filesDir, "skills"))
+        init(File(dataDir, "skills"))
     }
     val sourceUpdater: SourceUpdater = SourceUpdater(
         sources,

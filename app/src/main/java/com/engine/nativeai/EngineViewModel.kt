@@ -78,6 +78,10 @@ open class EngineViewModel(
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
     private var loadedPath: String? = null
     private var runJob: Job? = null
+    /** Open conversation thread (P3): quick sends and agent runs share one
+     *  session so follow-ups get real prior-turn context; Clear starts a new
+     *  conversation. */
+    private var activeSessionId: Long? = null
 
     // ---- Live run extras ----
     private val _elapsedMs = MutableStateFlow(0L)
@@ -125,6 +129,12 @@ open class EngineViewModel(
     }
 
     fun clearRun() {
+        // Clear = new conversation: close the thread so the next send starts
+        // a fresh session instead of pretending to continue the old one.
+        activeSessionId?.let { id ->
+            runCatching { toolbox?.memory?.endSession(id) }
+        }
+        activeSessionId = null
         _prompt.value = ""
         savedState[KEY_PROMPT] = ""
         _answer.value = ""
@@ -231,8 +241,12 @@ open class EngineViewModel(
         // two overlapping runs; the finally block always resets it.
         _running.value = true
         runJob = vmScope.launch(Dispatchers.Default) {
-            // Hoisted so the failure handler can report the routed provider.
+            // Hoisted so the failure handler can report the routed provider
+            // and the conversation exchange survives errors/stops (P3).
             var routedId: String? = null
+            val sb = StringBuilder()
+            val memory = toolbox?.memory
+            var sessionId: Long? = null
             try {
                 val ctx = appContext ?: return@launch
                 val reg = registry ?: return@launch
@@ -240,6 +254,14 @@ open class EngineViewModel(
                     RoutingMode.OFFLINE_ONLY
                 } else {
                     mode
+                }
+                // Multi-turn continuity: reuse the open thread, else start one.
+                sessionId = activeSessionId ?: runCatching {
+                    memory?.startSession("quick: ${_prompt.value.take(60)}")
+                        ?.also { activeSessionId = it }
+                }.getOrNull()
+                if (sessionId != null) {
+                    runCatching { memory?.recordMessage(sessionId, "user", _prompt.value) }
                 }
                 val descriptor = ModelRouter(effectiveMode, healthMonitor).route(
                     AgentTask(
@@ -278,7 +300,6 @@ open class EngineViewModel(
                 } else ""
                 _status.value = "generating via ${descriptor.id}$fallbackNote\u2026"
                 _lastRoute.value = RouteInfo(descriptor.id, descriptor.provider, descriptor.kind == ModelKind.REMOTE)
-                val sb = StringBuilder()
                 val startedMs = System.currentTimeMillis()
                 provider.stream(
                     ModelRequest(
@@ -299,15 +320,25 @@ open class EngineViewModel(
                 }
                 healthMonitor.reportSuccess(descriptor.id)
                 healthMonitor.reportLatency(descriptor.id, System.currentTimeMillis() - startedMs)
+                if (sessionId != null) {
+                    runCatching { memory?.recordMessage(sessionId, "agent", sb.toString().take(4000)) }
+                }
                 _status.value = "generation complete (${sb.length} chars)"
                 _engineState.value = EngineUiState.COMPLETED
             } catch (e: CancellationException) {
+                if (sessionId != null) {
+                    runCatching { memory?.recordMessage(sessionId, "agent", sb.toString().ifBlank { "[stopped] no output" }) }
+                }
                 _status.value = "generation stopped"
                 _engineState.value = EngineUiState.READY
             } catch (e: Exception) {
+                val friendly = friendlyGenerateError(e)
+                if (sessionId != null) {
+                    runCatching { memory?.recordMessage(sessionId, "agent", "[error] $friendly") }
+                }
                 healthMonitor.reportFailure(routedId ?: "unknown", e.message ?: "generate failed")
                 CoreErrors.log.record("generate", "generate failed: ${e.message}", e)
-                _status.value = "generate failed: ${e.message}"
+                _status.value = "generate failed: $friendly"
                 _engineState.value = EngineUiState.ERROR
             } finally {
                 _running.value = false
@@ -365,26 +396,34 @@ open class EngineViewModel(
                     skills = toolbox.skillManager.list(),
                     onApproval = ::approvalCallback,
                 )
-                // Multi-turn continuity: the most recent session's tail becomes
-                // prior-conversation context for this run (never the private
-                // memory DB contents — only the user/agent exchange).
+                // Multi-turn continuity (P3): the open thread's tail becomes
+                // prior-conversation context (never the private memory DB —
+                // only the user/agent exchange, oldest first). Follow-ups
+                // reuse the same session so the agent sees what it just said.
                 val priorConversation = try {
-                    val last = memory.recentSessions(1).firstOrNull()
-                    if (last != null) {
-                        memory.recentMessages(last.id, 6)
+                    val sid = activeSessionId ?: memory.recentSessions(1).firstOrNull()?.id
+                    if (sid != null) {
+                        memory.conversationTail(sid, 8)
                             .joinToString("\n") {
                                 if (it.role == "user") "YOU: ${it.content}" else "AGENT: ${it.content}"
-                            }.take(1500)
+                            }.take(2000)
                     } else ""
                 } catch (e: Exception) {
                     ""
                 }
-                val sessionId = try {
+                val sessionId = activeSessionId ?: try {
                     val id = memory.startSession("agent: ${prompt.take(60)}")
-                    memory.recordMessage(id, "user", prompt)
+                    activeSessionId = id
                     id
                 } catch (e: Exception) {
                     null // memory failure must never crash the agent
+                }
+                if (sessionId != null) {
+                    try {
+                        memory.recordMessage(sessionId, "user", prompt)
+                    } catch (e: Exception) {
+                        // best-effort persistence; never crashes the run
+                    }
                 }
                 try {
                     val steps = StringBuilder()
@@ -481,6 +520,11 @@ open class EngineViewModel(
                                 _output.value = steps.toString()
                                 _status.value = "agent error: ${ev.message}"
                                 _engineState.value = EngineUiState.ERROR
+                                if (sessionId != null) {
+                                    runCatching {
+                                        memory.recordMessage(sessionId, "agent", "[error] ${ev.message}")
+                                    }
+                                }
                             }
                         }
                     }
@@ -495,21 +539,30 @@ open class EngineViewModel(
                     _status.value = if (done) "agent done" else "agent ended without final answer"
                     if (!done) _engineState.value = EngineUiState.READY
                 } catch (e: CancellationException) {
+                    runCatching {
+                        if (sessionId != null) {
+                            memory.recordMessage(
+                                sessionId, "agent",
+                                answer.toString().ifBlank { "[stopped] no output" },
+                            )
+                        }
+                    }
                     _status.value = "agent stopped"
                     _engineState.value = EngineUiState.READY
                     throw e
                 } catch (e: Exception) {
-                    CoreErrors.log.record("agent", "run failed: ${e.message}", e)
-                    _status.value = "agent failed: ${e.message}"
-                    _engineState.value = EngineUiState.ERROR
-                } finally {
-                    if (sessionId != null) {
-                        try {
-                            memory.endSession(sessionId)
-                        } catch (_: Exception) {
-                            // best-effort session close
+                    val friendly = friendlyGenerateError(e)
+                    runCatching {
+                        if (sessionId != null) {
+                            memory.recordMessage(sessionId, "agent", "[error] $friendly")
                         }
                     }
+                    CoreErrors.log.record("agent", "run failed: ${e.message}", e)
+                    _status.value = "agent failed: $friendly"
+                    _engineState.value = EngineUiState.ERROR
+                } finally {
+                    // The session stays open for follow-ups (P3): it closes on
+                    // Clear / new conversation, not at the end of every run.
                     _running.value = false
                 }
             } catch (e: CancellationException) {
@@ -570,6 +623,24 @@ open class EngineViewModel(
     private fun appendTraceLine(line: String) {
         val t = java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))
         _output.value = _output.value.trimEnd('\n') + "\n$t $line"
+    }
+
+    /** Translates raw provider errors into actionable user-facing text.
+     *  Unknown errors pass through unchanged (honest, never invented). */
+    private fun friendlyGenerateError(e: Exception): String {
+        val msg = e.message ?: "operation failed"
+        val lower = msg.lowercase(Locale.US)
+        return when {
+            "rate limit" in lower || "rate_limit" in lower ->
+                "Free tier rate limit reached (anonymous). Add a free OpenCode Zen key via Configure, wait for the limit to reset, or use a local model."
+            "unauthorized" in lower || "401" in msg || "api key" in lower ->
+                "Provider rejected the request \u2014 add or fix the API key via Configure."
+            "timeout" in lower || "timed out" in lower ->
+                "Provider timed out \u2014 check connectivity and retry."
+            "network" in lower || "no internet" in lower ->
+                "Network unavailable \u2014 switch to a local model or reconnect."
+            else -> msg
+        }
     }
 
     private fun hasNetwork(context: Context): Boolean =

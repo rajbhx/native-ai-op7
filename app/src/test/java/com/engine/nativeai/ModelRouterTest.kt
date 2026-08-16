@@ -172,4 +172,70 @@ class ModelRouterTest {
         assertNotNull(d)
         assertEquals("remote-free", d?.id)
     }
+
+    // ---- P1: same-kind fallback (a failed model never silently jumps kind) ----
+
+    private fun localDescriptor(id: String) = ModelDescriptor(
+        id = id, displayName = id, provider = "local", endpoint = "",
+        modelType = "chat", kind = ModelKind.LOCAL, costTier = ModelCostTier.FREE,
+        availability = ModelAvailability.AVAILABLE, contextLength = 2048, mutable = false,
+    )
+
+    private fun freeRemoteDescriptor(id: String) = ModelDescriptor(
+        id = id, displayName = id, provider = "remote", endpoint = "https://x",
+        modelType = "chat", kind = ModelKind.REMOTE, costTier = ModelCostTier.FREE,
+        availability = ModelAvailability.AVAILABLE, contextLength = 32000,
+    )
+
+    @Test
+    fun preferKindFallsBackWithinLocalKindFirst() {
+        val r = ModelRegistry()
+        r.register(fakeProvider(localDescriptor("local-a")))
+        r.register(fakeProvider(localDescriptor("local-b")))
+        r.register(fakeProvider(freeRemoteDescriptor("remote-free")))
+        val router = ModelRouter(RoutingMode.HYBRID)
+        val d = router.route(
+            task(), r,
+            excludeIds = setOf("local-a"),
+            preferKind = ModelKind.LOCAL,
+        )
+        assertNotNull(d)
+        // The user's local pick failed; fallback stays local — never remote.
+        assertEquals("local-b", d?.id)
+    }
+
+    @Test
+    fun preferKindKeepsRemoteKindInsteadOfJumpingToLocal() {
+        val r = ModelRegistry()
+        r.register(fakeProvider(localDescriptor("local-a")))
+        r.register(fakeProvider(freeRemoteDescriptor("remote-free-1")))
+        r.register(fakeProvider(freeRemoteDescriptor("remote-free-2")))
+        val router = ModelRouter(RoutingMode.HYBRID)
+        val d = router.route(
+            task(network = true), r,
+            excludeIds = setOf("remote-free-1"),
+            preferKind = ModelKind.REMOTE,
+        )
+        assertNotNull(d)
+        // HYBRID simple chat prefers local, but the failed kind wins the
+        // fallback: another remote, not a silent local substitution.
+        assertEquals("remote-free-2", d?.id)
+    }
+
+    @Test
+    fun preferKindLocalStillFallsBackToRemoteWhenNoSameKindLeft() {
+        val r = ModelRegistry()
+        r.register(fakeProvider(localDescriptor("local-a")))
+        r.register(fakeProvider(freeRemoteDescriptor("remote-free")))
+        val router = ModelRouter(RoutingMode.HYBRID)
+        val d = router.route(
+            task(), r,
+            excludeIds = setOf("local-a"),
+            preferKind = ModelKind.LOCAL,
+        )
+        // No second local exists: the full pool opens, and the agent emits
+        // an honest Routed(reason) for the substitution.
+        assertNotNull(d)
+        assertEquals("remote-free", d?.id)
+    }
 }

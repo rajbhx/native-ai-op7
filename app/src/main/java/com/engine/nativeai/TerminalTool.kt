@@ -21,6 +21,12 @@ class TerminalTool(
         "Run one shell command on this device, return exit code + output."
     override val permission = ToolPermission.REQUIRES_APPROVAL
     override val available: Boolean get() = enabledFlag && backend.available
+    override val unavailableReason: String?
+        get() = when {
+            !enabledFlag -> "terminal disabled"
+            !backend.available -> "backend unavailable (${backendLabel ?: "?"})"
+            else -> null
+        }
     override val backendLabel: String?
         get() = if (backend is TermuxBackend) "termux" else "local"
 

@@ -18,6 +18,11 @@ interface ModelPreferencesStore {
     var toolAlwaysAllow: Set<String>
     var firstRunDismissed: Boolean
     var systemPromptOverride: String?
+    /** Absolute app-writable directory for the memory DB / vectors / skills.
+     *  null = app-private internal storage (filesDir). */
+    var dataDirOverride: String?
+    /** Absolute app-writable directory for GGUF models. null = filesDir/models. */
+    var modelsDirOverride: String?
     fun favorites(): Set<String>
     fun isFavorite(id: String): Boolean
     fun toggleFavorite(id: String): Set<String>
@@ -34,6 +39,8 @@ class InMemoryModelPreferences : ModelPreferencesStore {
     override var toolAlwaysAllow: Set<String> = emptySet()
     override var firstRunDismissed: Boolean = false
     override var systemPromptOverride: String? = null
+    override var dataDirOverride: String? = null
+    override var modelsDirOverride: String? = null
     private val favs = mutableSetOf<String>()
     override fun favorites(): Set<String> = favs.toSet()
     override fun isFavorite(id: String): Boolean = id in favs
@@ -107,6 +114,26 @@ class ModelPreferences(context: Context) : ModelPreferencesStore {
                 prefs.edit().remove("system_prompt_override").apply()
             } else {
                 prefs.edit().putString("system_prompt_override", value).apply()
+            }
+        }
+
+    override var dataDirOverride: String?
+        get() = prefs.getString("data_dir_override", null)
+        set(value) {
+            if (value.isNullOrBlank()) {
+                prefs.edit().remove("data_dir_override").apply()
+            } else {
+                prefs.edit().putString("data_dir_override", value).apply()
+            }
+        }
+
+    override var modelsDirOverride: String?
+        get() = prefs.getString("models_dir_override", null)
+        set(value) {
+            if (value.isNullOrBlank()) {
+                prefs.edit().remove("models_dir_override").apply()
+            } else {
+                prefs.edit().putString("models_dir_override", value).apply()
             }
         }
 

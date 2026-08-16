@@ -38,6 +38,8 @@ import androidx.compose.ui.unit.sp
 import com.engine.nativeai.Experience
 import com.engine.nativeai.GgufMetaCache
 import com.engine.nativeai.MemoryBudget
+import com.engine.nativeai.ModelPreferencesStore
+import com.engine.nativeai.StoragePaths
 import com.engine.nativeai.Fact
 import com.engine.nativeai.MemoryDatabase
 import com.engine.nativeai.Message
@@ -56,9 +58,11 @@ import kotlinx.coroutines.withContext
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MemoryScreen(onBack: () -> Unit) {
+fun MemoryScreen(onBack: () -> Unit, prefs: ModelPreferencesStore? = null) {
     val context = LocalContext.current
-    val memory = remember { MemoryDatabase(context.applicationContext) }
+    val memory = remember {
+        MemoryDatabase(context.applicationContext, StoragePaths.memoryDbPath(context.applicationContext, prefs))
+    }
     var query by remember { mutableStateOf("") }
     var selectedSession by remember { mutableStateOf<SessionInfo?>(null) }
     var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
