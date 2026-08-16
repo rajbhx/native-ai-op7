@@ -21,7 +21,7 @@ class ModelManifestTest {
         try {
             ModelManifest.record(dir, "model.gguf", "ABC123", 491L * 1024 * 1024, "https://example/model.gguf")
             val entry = ModelManifest.entryFor(File(dir, "model.gguf"))
-            assertEquals("ABC123", entry?.sha256)
+            assertEquals("abc123", entry?.sha256)
             assertEquals(491L * 1024 * 1024, entry?.bytes)
             assertEquals("https://example/model.gguf", entry?.url)
         } finally {

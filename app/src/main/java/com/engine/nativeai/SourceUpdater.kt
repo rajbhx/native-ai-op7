@@ -254,7 +254,10 @@ class SourceUpdater(
     private fun siteFilePath(url: String): String {
         val bare = url.removePrefix("https://").removePrefix("http://")
         val path = bare.substringBefore('#').substringBefore('?')
-        return if (path.contains('.')) path else "$path.html"
+        // Extension detection is on the final path segment only: the host
+        // itself contains dots ("fmhy.net/ai" must become "fmhy.net/ai.html").
+        val tail = path.substringAfterLast('/', "")
+        return if (tail.contains('.')) path else "$path.html"
     }
 
     private fun sha256(bytes: ByteArray): String =

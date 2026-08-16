@@ -40,7 +40,6 @@ class MemoryBudgetTest {
         assertEquals("Q8_0", Op7SystemProfile.KV_QUANT_TYPE)
         assertEquals(4, Op7SystemProfile.THREADS)
     }
-}
 
     @Test
     fun realMetadataKvFormulaMatchesShippedModel() {
@@ -60,3 +59,4 @@ class MemoryBudgetTest {
         // MemoryMonitor.cpp kOp7MemoryLimitBytes MUST equal this exact byte count.
         assertEquals(1_610_612_736L, Op7SystemProfile.MEMORY_LIMIT_BYTES)
     }
+}

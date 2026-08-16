@@ -46,7 +46,6 @@ class ContextManagerTest {
         assertTrue("user prompt must survive", text.contains("u".repeat(40)))
         assertFalse("sources must be dropped before hard truncation", text.contains("Relevant sources:"))
     }
-}
 
     @Test
     fun rendersConversationSectionWhenProvided() {
@@ -74,3 +73,4 @@ class ContextManagerTest {
         assertFalse("memory must drop before user truncation", text.contains("Relevant memory:"))
         assertTrue("user prompt must survive", text.contains("u".repeat(40)))
     }
+}
