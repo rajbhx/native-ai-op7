@@ -49,6 +49,9 @@ class FakeSourceStore : SourceStore {
 
     override fun sourceFiles(sourceId: Long): List<SourceFile> = files[sourceId]?.toList() ?: emptyList()
 
+    override fun sourceFileById(id: Long): SourceFile? =
+        files.values.flatten().firstOrNull { it.id == id }
+
     override fun chunkById(id: Long): SourceChunk? = chunks.values.flatten().firstOrNull { it.id == id }
 
     override fun chunksForFile(fileId: Long): List<SourceChunk> =
