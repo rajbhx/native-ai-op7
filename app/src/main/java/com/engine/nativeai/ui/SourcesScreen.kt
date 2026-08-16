@@ -80,7 +80,7 @@ import kotlinx.coroutines.withContext
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SourcesScreen(onBack: () -> Unit, prefs: ModelPreferencesStore? = null) {
+fun SourcesScreen(onBack: () -> Unit, prefs: ModelPreferencesStore? = null, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val db = remember {
         MemoryDatabase(context.applicationContext, StoragePaths.memoryDbPath(context.applicationContext, prefs))
@@ -187,7 +187,7 @@ fun SourcesScreen(onBack: () -> Unit, prefs: ModelPreferencesStore? = null) {
     }
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .background(OpBg)
             .padding(16.dp),

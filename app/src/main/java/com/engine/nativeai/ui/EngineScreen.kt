@@ -186,6 +186,7 @@ fun EngineScreen(
     discovery: ModelDiscoveryService,
     localLibrary: LocalModelLibrary,
     initialPrompt: String?,
+    modifier: Modifier = Modifier,
     onOpenMemory: () -> Unit = {},
     onOpenSources: () -> Unit = {},
 ) {
@@ -347,7 +348,6 @@ fun EngineScreen(
     val trainingPipeline = remember {
         SelfLearningPipeline(toolbox.memory, File(StoragePaths.dataDir(context, prefs), "training"))
     }
-    var firstRunDismissed by remember { mutableStateOf(prefs.firstRunDismissed) }
     val importer = remember(modelsDir) { LocalModelImporter(modelsDir) }
     val pickLocalLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -542,7 +542,7 @@ fun EngineScreen(
     ) EngineUiState.OFFLINE else engineState
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .background(OpBg)
             .imePadding()
@@ -583,36 +583,7 @@ fun EngineScreen(
                 Text("OP7", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Text("SD855 \u00b7 6-8 GB", color = OpTextSecondary, fontSize = 9.sp)
             }
-            Spacer(Modifier.width(8.dp))
-            Surface(
-                onClick = onOpenMemory,
-                shape = RoundedCornerShape(8.dp),
-                color = OpCard,
-                border = BorderStroke(1.dp, OpBorder),
-            ) {
-                Text(
-                    "MEMORY",
-                    color = OpTextSecondary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                )
-            }
-            Spacer(Modifier.width(6.dp))
-            Surface(
-                onClick = onOpenSources,
-                shape = RoundedCornerShape(8.dp),
-                color = OpCard,
-                border = BorderStroke(1.dp, OpBorder),
-            ) {
-                Text(
-                    "SOURCES",
-                    color = OpTextSecondary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                )
-            }
+
         }
         Spacer(Modifier.height(10.dp))
 
@@ -665,45 +636,35 @@ fun EngineScreen(
                 )
             }
         }
-        if (models.isEmpty() && localModels.isEmpty() && !firstRunDismissed) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .background(OpCard, RoundedCornerShape(12.dp))
-                    .border(BorderStroke(1.dp, OpBorder), RoundedCornerShape(12.dp))
-                    .padding(10.dp),
-            ) {
-                Text("FIRST RUN", color = OpText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    "1. Pick a model \u00b7 2. Download or import a GGUF \u00b7 3. Add sources",
-                    color = OpTextSecondary,
-                    fontSize = 11.sp,
-                )
-                Spacer(Modifier.height(6.dp))
-                Row(Modifier.fillMaxWidth()) {
-                    PillButton("Pick a model", Modifier.weight(1f), primary = true) { showPicker = true }
-                    Spacer(Modifier.width(8.dp))
-                    PillButton("Download GGUF", Modifier.weight(1f)) {
-                        downloadStatus = resumeHint(downloadTarget)
-                        showDownloadDialog = true
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-                Row(Modifier.fillMaxWidth()) {
-                    PillButton("Add sources", Modifier.weight(1f)) { onOpenSources() }
-                    Spacer(Modifier.width(8.dp))
-                    PillButton("Skip", Modifier.weight(1f)) {
-                        firstRunDismissed = true
-                        prefs.firstRunDismissed = true
-                    }
+        // ---------------- QUICK ACTIONS (always visible) ----------------
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            PillButton("Pick model", Modifier.weight(1f), primary = selected == null) { showPicker = true }
+            PillButton("Import GGUF", Modifier.weight(1f)) {
+                pickLocalLauncher.launch(arrayOf("*/*"))
+            }
+            PillButton("Download", Modifier.weight(1f)) {
+                downloadStatus = resumeHint(downloadTarget)
+                showDownloadDialog = true
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        // ---------------- MODE SELECTOR ----------------
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(OpBg, RoundedCornerShape(20.dp))
+                .padding(2.dp),
+        ) {
+            modes.forEachIndexed { i, label ->
+                ValuePill(label, selected = i == selectedMode, modifier = Modifier.weight(1f)) {
+                    selectedMode = i
+                    prefs.routingMode = routingModes[i]
                 }
             }
-            Spacer(Modifier.height(12.dp))
-        } else {
-            Spacer(Modifier.height(12.dp))
         }
+        Spacer(Modifier.height(10.dp))
 
-        // ---------------- PROMPT (primary interaction) ----------------
+                // ---------------- PROMPT (primary interaction) ----------------
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = prompt,
