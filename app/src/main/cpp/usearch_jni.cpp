@@ -137,7 +137,7 @@ Java_com_engine_nativeai_USearchVectorIndex_nativeLoad(
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_engine_nativeai_USearchVectorIndex_nativeSelfTest(JNIEnv* env, jclass) {
+Java_com_engine_nativeai_USearchVectorIndex_00024Companion_nativeSelfTest(JNIEnv* env, jclass) {
     // In-memory smoke: 3 vectors, cosine search must return the nearest key.
     try {
         constexpr std::size_t dims = 4;

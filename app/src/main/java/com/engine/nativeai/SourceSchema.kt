@@ -10,7 +10,7 @@ package com.engine.nativeai
  * changed-blob-only re-chunking, read-time LRU eviction.
  */
 object SourceSchema {
-    const val SCHEMA_VERSION = 4
+    const val SCHEMA_VERSION = 5
 
     /** Non-FTS tables; safe on any SQLite build (incl. OP7/OxygenOS 10). */
     val DDL: List<String> = listOf(
@@ -61,6 +61,12 @@ object SourceSchema {
             source_file_id INTEGER NOT NULL,
             chunk_index INTEGER NOT NULL,
             content TEXT NOT NULL
+        )
+        """.trimIndent(),
+        """
+        CREATE TABLE IF NOT EXISTS source_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         )
         """.trimIndent(),
     )

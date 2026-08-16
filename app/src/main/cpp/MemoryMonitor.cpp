@@ -26,7 +26,7 @@ std::string MemoryMonitor::statsJson(const llama_model* model,
         return "{}";
     }
     const uint64_t rss = hw::rssBytes();
-    const uint64_t limit = 1572864000ULL;  // 1.5 GB AI runtime ceiling
+    const uint64_t limit = kOp7MemoryLimitBytes;  // 1536 MiB, see MemoryMonitor.hpp
     char buf[420];
     std::snprintf(buf, sizeof(buf),
                   "{\"model_bytes\":%llu,\"n_ctx\":%u,\"kv_type_k\":\"%s\","

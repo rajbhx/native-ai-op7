@@ -18,6 +18,14 @@ val OpBlue = Color(0xFF008BFF)
 val OpAmber = Color(0xFFF5A623)
 val OpSuccess = Color(0xFF2ECC71)
 
+/** Semantic roles: red = exactly one primary action per screen + danger. */
+val OpPrimaryAction = OpRed
+val OpStatusSuccess = OpSuccess
+val OpStatusWarn = OpAmber
+val OpStatusInfo = OpBlue
+val OpStatusDanger = OpRed
+val OpLinkAccent = OpBlue
+
 private val OpColors = darkColorScheme(
     primary = OpRed,
     onPrimary = Color.White,

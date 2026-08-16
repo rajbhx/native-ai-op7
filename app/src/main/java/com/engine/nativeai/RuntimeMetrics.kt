@@ -40,20 +40,24 @@ class RuntimeMetrics {
     private var droppedFrames = 0L
     private var jankyFrames = 0L
 
+    @Synchronized
     fun recordModelLoad(durationMs: Long) {
         modelLoadMs = durationMs
     }
 
+    @Synchronized
     fun recordFirstToken(durationMs: Long) {
         if (firstTokenMs == null) firstTokenMs = durationMs
     }
 
+    @Synchronized
     fun recordRun(tokens: Int, durationMs: Long) {
         lastRunTokens = tokens
         lastRunDurationMs = durationMs
         tokensPerSec = if (durationMs > 0) tokens * 1000.0 / durationMs else null
     }
 
+    @Synchronized
     fun recordTool(tool: String, durationMs: Long, ok: Boolean) {
         val cur = toolMetrics[tool] ?: ToolMetric()
         toolMetrics[tool] = ToolMetric(
@@ -63,23 +67,28 @@ class RuntimeMetrics {
         )
     }
 
+    @Synchronized
     fun recordError() {
         errors++
     }
 
+    @Synchronized
     fun recordRetry() {
         retries++
     }
 
+    @Synchronized
     fun recordServiceRestart() {
         serviceRestarts++
     }
 
+    @Synchronized
     fun recordFrames(dropped: Long, janky: Long) {
         droppedFrames += dropped
         jankyFrames += janky
     }
 
+    @Synchronized
     fun reset() {
         modelLoadMs = null
         firstTokenMs = null
@@ -94,6 +103,7 @@ class RuntimeMetrics {
         jankyFrames = 0L
     }
 
+    @Synchronized
     fun snapshot(): MetricsSnapshot = MetricsSnapshot(
         modelLoadMs = modelLoadMs,
         firstTokenMs = firstTokenMs,

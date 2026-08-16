@@ -115,6 +115,15 @@ class JdbcSourceStore(private val conn: Connection) : SourceStore {
             ps.executeQuery().use { rs -> if (rs.next()) rs.toSourceChunk() else null }
         }
 
+    override fun chunksForFile(fileId: Long): List<SourceChunk> =
+        conn.prepareStatement(
+            "SELECT * FROM source_chunks WHERE source_file_id = ? ORDER BY chunk_index ASC",
+        ).use { ps ->
+            ps.setLong(1, fileId); ps.executeQuery().use { rs ->
+                buildList { while (rs.next()) add(rs.toSourceChunk()) }
+            }
+        }
+
     override fun sourceFiles(sourceId: Long): List<SourceFile> =
         conn.prepareStatement("SELECT * FROM source_files WHERE source_id = ? ORDER BY path ASC").use { ps ->
             ps.setLong(1, sourceId); ps.executeQuery().use { rs ->
@@ -313,4 +322,18 @@ class JdbcSourceStore(private val conn: Connection) : SourceStore {
         chunkIndex = getInt("chunk_index"),
         content = getString("content"),
     )
+    override fun metaGet(key: String): String? =
+        conn.prepareStatement("SELECT value FROM source_meta WHERE key = ?").use { ps ->
+            ps.setString(1, key); ps.executeQuery().use { if (it.next()) it.getString(1) else null }
+        }
+
+    override fun metaSet(key: String, value: String) {
+        conn.prepareStatement(
+            "INSERT INTO source_meta(key, value) VALUES(?, ?) " +
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        ).use { ps ->
+            ps.setString(1, key); ps.setString(2, value); ps.executeUpdate()
+        }
+    }
+
 }

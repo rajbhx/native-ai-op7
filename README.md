@@ -38,6 +38,56 @@ arm64-v8a only. **Builds run on GitHub Actions, never locally.**
 - `docs/source-research/` — architecture audit + ADR-001..010
 - `docs/field-notes/` — journal consumed by the playbook sync
 
+## Golden-standard wiring (current)
+- **Single authority**: `EngineViewModel` owns run state (StateFlows);
+  rotation survives runs; agent/generate loops run off Main
+  (`Dispatchers.Default`), UI updates are thread-safe StateFlow writes.
+  The prompt also survives process death via `SavedStateHandle` (selection
+  already persisted in prefs).
+- **Multi-turn context**: the last session's tail is injected as
+  `priorConversation` into every agent run (ContextManager priority:
+  system > user > observations > conversation > memory > sources).
+- **Citations**: `AgentEvent.Final` carries the source hits used; the trace
+  renders `SOURCE · [title/path]` lines under the answer.
+- **Router health**: one shared `ProviderHealthMonitor` (VM-owned) tracks
+  failures + measured latency; routers sort by health, reliability, speed,
+  then latency; failures are reported per run.
+- **Fallback transparency**: when a preferred model is substituted, the
+  trace (`FALLBACK ...` line) and status state the honest reason
+  (rate-limited / unavailable in mode) instead of silently switching.
+- **Model integrity**: `ModelManifest` (models/.manifest.json) records
+  SHA-256 + size + URL per GGUF; `ModelDownloader` computes SHA-256 while
+  streaming; `ensureLocalLoaded` refuses to load a checksum mismatch;
+  `LocalModelLibrary.storageUsedBytes()` drives the STORAGE line.
+- **Download resume**: cancelled/interrupted downloads keep the `.tmp`
+  partial; the next attempt sends `Range: bytes=N-` and appends. SHA-256 is
+  still computed over the full file (existing bytes replayed from disk), so
+  resumed files pass the checksum gate. Servers that ignore Range restart
+  cleanly.
+- **Skills wired**: `Toolbox.skillManager` (seeded `DefaultSkills`) feeds
+  the agent; the active skill's workflow/constraints append to the system
+  prompt by task type.
+- **Skills panel (Phase 10)**: ENGINE SETTINGS → SKILLS lists seeded vs
+  custom skills; users create/edit/delete their own (built-ins read-only,
+  persisted as JSON under app storage; empty list re-seeds defaults).
+- **Memory lifecycle**: low-utility memories are pruned after each completed
+  run (`deleteLowUtilityMemories`), best-effort.
+- **Approval policy UI**: REQUIRES_APPROVAL tools get an ALWAYS toggle in
+  ENGINE SETTINGS → TOOL INVENTORY (persisted in `toolAlwaysAllow`).
+- **Benchmark in Diagnostics**: run the measured prompt battery
+  (`ModelBenchmark`) per selected model, view results in the dialog.
+- **Verified dataset export (Phase 4)**: Diagnostics → Export dataset runs
+  `SelfLearningPipeline` (JSONL from verified experiences, dedupe, min-pair
+  gate) and reports LoRA eligibility reasons — never silently trains.
+- **Test infra**: Robolectric unit tests now cover Context-bound state
+  (`ModelPreferences` SharedPrefs round-trips) on the JVM — test-only, no
+  APK impact.
+- **Embeddings**: hybrid BM25+HNSW is wired but gated — see
+  `docs/EMBEDDINGS.md` (no fake vector capability). Chunks are indexed at
+  ingest (`SourceUpdater.indexChunksIfReady`) the moment the embedding gate
+  opens; until then the path is dormant by design.
+- Source catalog: `docs/GOLDEN-SOURCE-CATALOG.md`.
+
 ## Pinned dependency
 - `third_party/llama.cpp` — submodule pinned to release **b10428** (`885c5bb`),
   shallow. Native code is written ONLY against the API in that exact checkout

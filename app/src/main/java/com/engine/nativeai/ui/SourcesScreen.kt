@@ -6,6 +6,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -72,7 +74,8 @@ fun SourcesScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val db = remember { MemoryDatabase(context.applicationContext) }
     val registry = remember {
-        SourceRegistry(db).apply { seed(SourceSeedLoader(context.applicationContext).load()) }
+        val loader = SourceSeedLoader(context.applicationContext)
+        SourceRegistry(db).apply { seed(loader.load(), loader.catalogVersion()) }
     }
     val updater = remember { SourceUpdater(registry, db) }
     val search = remember { SourceSearch(db) }
@@ -215,9 +218,18 @@ fun SourcesScreen(onBack: () -> Unit) {
         if (query.isNotBlank()) {
             Text("KNOWLEDGE HITS", color = OpTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
-            LazyColumn {
-                items(hits) { hit ->
-                    SourceHitRow(hit)
+            if (hits.isEmpty()) {
+                Text(
+                    "No matches found \u2014 nothing indexed yet. Tap REFRESH or ADD to index sources.",
+                    color = OpTextSecondary,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            } else {
+                LazyColumn {
+                    items(hits) { hit ->
+                        SourceHitRow(hit)
+                    }
                 }
             }
         } else {
@@ -282,6 +294,18 @@ fun SourcesScreen(onBack: () -> Unit) {
                     val id = withContext(Dispatchers.IO) {
                         registry.addSource(
                             Source(0, colId, title, SourceType.WEB_PAGE, contentUrl = url),
+                        )
+                    }
+                    refreshOne(id)
+                    showAdd = false
+                }
+            },
+            onAddSite = { title, url, collection ->
+                scope.launch {
+                    val colId = withContext(Dispatchers.IO) { db.upsertSourceCollection(collection) }
+                    val id = withContext(Dispatchers.IO) {
+                        registry.addSource(
+                            Source(0, colId, title, SourceType.SITE, contentUrl = url),
                         )
                     }
                     refreshOne(id)
@@ -364,7 +388,7 @@ private fun SourceRow(
                 color = OpTextSecondary,
                 fontSize = 11.sp,
             )
-            if (s.error != null) {
+            if (s.status == SourceStatus.ERROR && s.error != null) {
                 Spacer(Modifier.height(4.dp))
                 Text(s.error, color = OpRed, fontSize = 11.sp)
             }
@@ -406,7 +430,7 @@ private fun SourceHitRow(hit: SourceSearchHit) {
         Column(Modifier.padding(12.dp)) {
             Text(
                 "${hit.sourceTitle} / ${hit.filePath}",
-                color = OpRed,
+                color = OpText,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
             )
@@ -416,11 +440,13 @@ private fun SourceHitRow(hit: SourceSearchHit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AddSourceDialog(
     onDismiss: () -> Unit,
     onAddGithub: (String, String, String, String) -> Unit,
     onAddUrl: (String, String, String) -> Unit,
+    onAddSite: (String, String, String) -> Unit,
     onAddText: (String, String, String) -> Unit,
     onAddLocal: (String, String, String) -> Unit,
     onAddDocument: (String, String, String) -> Unit,
@@ -440,6 +466,7 @@ private fun AddSourceDialog(
         SourceType.RAW_TEXT -> title.isNotBlank() && text.isNotBlank()
         SourceType.LOCAL_FILE -> title.isNotBlank() && path.isNotBlank()
         SourceType.DOCUMENT -> title.isNotBlank() && url.isNotBlank()
+        SourceType.SITE -> title.isNotBlank() && url.startsWith("http")
     }
 
     AlertDialog(
@@ -448,8 +475,8 @@ private fun AddSourceDialog(
         title = { Text("ADD SOURCE", color = OpText, fontWeight = FontWeight.Bold) },
         text = {
             Column {
-                Row {
-                    listOf(SourceType.GITHUB_REPO, SourceType.WEB_PAGE, SourceType.RAW_TEXT, SourceType.LOCAL_FILE, SourceType.DOCUMENT)
+                FlowRow {
+                    listOf(SourceType.GITHUB_REPO, SourceType.WEB_PAGE, SourceType.SITE, SourceType.RAW_TEXT, SourceType.LOCAL_FILE, SourceType.DOCUMENT)
                         .forEach { t ->
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -486,6 +513,11 @@ private fun AddSourceDialog(
                     SourceType.WEB_PAGE -> {
                         OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("https://…", color = OpTextSecondary) }, singleLine = true, colors = fieldColors(), modifier = Modifier.fillMaxWidth())
                     }
+                    SourceType.SITE -> {
+                        OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("https://\u2026/sitemap.xml", color = OpTextSecondary) }, singleLine = true, colors = fieldColors(), modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(4.dp))
+                        Text("Site ingestion: one source = every page in the sitemap, refreshed on its cadence (FMHY-style external knowledge).", color = OpTextSecondary, fontSize = 10.sp)
+                    }
                     SourceType.RAW_TEXT -> {
                         OutlinedTextField(value = text, onValueChange = { text = it }, label = { Text("Paste content", color = OpTextSecondary) }, minLines = 3, colors = fieldColors(), modifier = Modifier.fillMaxWidth())
                     }
@@ -517,6 +549,7 @@ private fun AddSourceDialog(
                         SourceType.RAW_TEXT -> onAddText(title.trim(), text, collection.trim())
                         SourceType.LOCAL_FILE -> onAddLocal(title.trim(), path.trim(), collection.trim())
                         SourceType.DOCUMENT -> onAddDocument(title.trim(), url.trim(), collection.trim())
+                        SourceType.SITE -> onAddSite(title.trim(), url.trim(), collection.trim())
                     }
                 },
                 enabled = canSubmit(),
@@ -545,6 +578,7 @@ private fun typeLine(s: Source): String = when (s.type) {
     SourceType.RAW_TEXT -> "TEXT"
     SourceType.LOCAL_FILE -> "LOCAL \u00b7 ${s.contentUrl ?: "?"}"
     SourceType.DOCUMENT -> "DOCUMENT \u00b7 ${s.contentUrl ?: "?"}"
+    SourceType.SITE -> "SITE \u00b7 ${s.contentUrl ?: "?"}"
 }
 
 private fun ago(ts: Long): String {

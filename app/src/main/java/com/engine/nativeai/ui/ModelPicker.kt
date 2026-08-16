@@ -2,11 +2,14 @@ package com.engine.nativeai.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -176,7 +179,7 @@ fun ModelPickerDialog(
                         modifier = Modifier.weight(1f),
                     )
                     TextButton(onClick = onRefresh) {
-                        Text("Refresh", color = OpRed)
+                        Text("Refresh", color = OpLinkAccent)
                     }
                 }
             }
@@ -199,9 +202,15 @@ private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
         color = if (selected) OpText else OpTextSecondary,
         fontSize = 11.sp,
         modifier = Modifier
-            .background(if (selected) OpRed else OpCard, RoundedCornerShape(14.dp))
+            .defaultMinSize(minHeight = 48.dp)
+            .background(if (selected) OpCard else Color.Transparent, RoundedCornerShape(14.dp))
+            .border(
+                BorderStroke(1.dp, if (selected) OpBorder else OpDivider),
+                RoundedCornerShape(14.dp),
+            )
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 5.dp),
+            .padding(horizontal = 12.dp, vertical = 0.dp)
+            .wrapContentHeight(Alignment.CenterVertically),
     )
 }
 
@@ -245,7 +254,7 @@ private fun ModelRow(
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 )
                 if (selected) {
-                    Text(" ✓", color = OpRed, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(" ✓", color = OpLinkAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -297,7 +306,7 @@ private fun PickLocalRow(onPickLocal: () -> Unit) {
     ) {
         Text(
             "\uff0b Pick GGUF from storage\u2026",
-            color = OpRed,
+            color = OpLinkAccent,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
         )

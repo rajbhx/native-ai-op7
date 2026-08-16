@@ -11,6 +11,7 @@
         <package android:name="com.termux" />
     </queries>
     <application
+        android:name=".NativeAiApp"
         android:theme="@style/Theme.NativeAI"
         android:extractNativeLibs="true"
         android:label="@string/app_name"
@@ -19,6 +20,7 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="false">
         <activity
+        android:windowSoftInputMode="adjustResize"
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>

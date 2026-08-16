@@ -108,4 +108,32 @@ class SourceStoreJdbcTest {
         assertTrue(hits.isNotEmpty())
         assertEquals("notes", hits[0].sourceTitle)
     }
+    @Test
+    fun chunksForFileReturnsChunksInIndexOrder() {
+        val store = JdbcSourceStore.open(createFts = false)
+        store.upsertSourceCollection("AI")
+        store.saveSource(Source(0, 1, "llama.cpp", SourceType.GITHUB_REPO))
+        val src = store.sources().first()
+        val fileId = store.upsertSourceFile(SourceFile(0, src.id, "README.md", "abc", sizeBytes = 1))
+        store.replaceSourceChunks(src.id, fileId, listOf("chunk zero", "chunk one", "chunk two"))
+        val chunks = store.chunksForFile(fileId)
+        assertEquals(listOf(0, 1, 2), chunks.map { it.chunkIndex })
+        assertEquals(listOf("chunk zero", "chunk one", "chunk two"), chunks.map { it.content })
+        assertEquals(src.id, chunks.first().sourceId)
+        // Unrelated files stay isolated.
+        val other = store.upsertSourceFile(SourceFile(0, src.id, "docs/other.md", "x", sizeBytes = 1))
+        store.replaceSourceChunks(src.id, other, listOf("other"))
+        assertEquals(3, store.chunksForFile(fileId).size)
+    }
+
+    @Test
+    fun metaKeyValueRoundTrip() {
+        val store = JdbcSourceStore.open(createFts = false)
+        assertEquals(null, store.metaGet("source_catalog_version"))
+        store.metaSet("source_catalog_version", "2")
+        store.metaSet("source_catalog_version", "3")
+        assertEquals("3", store.metaGet("source_catalog_version"))
+        assertEquals(null, store.metaGet("missing"))
+    }
+
 }

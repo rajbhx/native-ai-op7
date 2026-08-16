@@ -24,6 +24,9 @@ sealed class AgentEvent {
         val provider: String,
         val costTier: ModelCostTier,
         val taskType: TaskType,
+        /** Honest reason when the router substituted a different model than
+         *  the explicit selection (preferred unavailable/rate-limited). */
+        val reason: String = "",
         val atMs: Long = System.currentTimeMillis(),
         val durationMs: Long = 0,
     ) : AgentEvent()
@@ -51,6 +54,7 @@ sealed class AgentEvent {
 
     data class Final(
         val answer: String,
+        val sources: List<String> = emptyList(),
         val atMs: Long = System.currentTimeMillis(),
         val durationMs: Long = 0,
     ) : AgentEvent()

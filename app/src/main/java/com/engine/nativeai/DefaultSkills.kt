@@ -16,6 +16,7 @@ object DefaultSkills {
             ),
             constraints = "Never fabricate sources; if search is unavailable, say so.",
             verificationRules = listOf("web_search returned ok or explicitly unavailable"),
+            builtin = true,
         ),
         Skill(
             id = "android",
@@ -28,6 +29,7 @@ object DefaultSkills {
             ),
             constraints = "Local engine only for offline reasoning.",
             verificationRules = listOf("memory claims are checked against stored context"),
+            builtin = true,
         ),
         Skill(
             id = "oneplus",
@@ -40,6 +42,7 @@ object DefaultSkills {
             ),
             constraints = "Never claim a performance number without a measurement.",
             verificationRules = listOf("performance claims cite a measurement"),
+            builtin = true,
         ),
         Skill(
             id = "coding",
@@ -52,6 +55,7 @@ object DefaultSkills {
             ),
             constraints = "Output code as text; never execute model-generated code.",
             verificationRules = listOf("code is presented as text, not executed"),
+            builtin = true,
         ),
     )
 }

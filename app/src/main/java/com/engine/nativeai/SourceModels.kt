@@ -1,7 +1,7 @@
 package com.engine.nativeai
 
 /** Source Knowledge Base models (roadmap Phase 4-6). */
-enum class SourceType { RAW_TEXT, WEB_PAGE, LOCAL_FILE, GITHUB_REPO, DOCUMENT }
+enum class SourceType { RAW_TEXT, WEB_PAGE, LOCAL_FILE, GITHUB_REPO, DOCUMENT, SITE }
 
 enum class SourceStatus { NEW, INDEXED, ERROR, STALE }
 

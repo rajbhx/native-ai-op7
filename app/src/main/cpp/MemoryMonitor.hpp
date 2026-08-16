@@ -3,9 +3,15 @@
 // profiling — nothing here is fabricated.
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include "llama.h"
+
+// Single source of truth for the AI-runtime RAM ceiling: 1536 MiB = 1.5 GB.
+// MUST equal Op7SystemProfile.MEMORY_LIMIT_BYTES (Kotlin); the contract is
+// pinned by MemoryBudgetTest.nativeCeilingMatchesKotlinSingleSourceOfTruth.
+constexpr uint64_t kOp7MemoryLimitBytes = 1610612736ULL;
 
 class MemoryMonitor {
 public:

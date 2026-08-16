@@ -40,4 +40,23 @@ class MemoryBudgetTest {
         assertEquals("Q8_0", Op7SystemProfile.KV_QUANT_TYPE)
         assertEquals(4, Op7SystemProfile.THREADS)
     }
+
+    @Test
+    fun realMetadataKvFormulaMatchesShippedModel() {
+        // Qwen2.5-1B: 24 layers, 1024 hidden -> 2*2048*24*1024 = ~96 MB @ Q8_0
+        val budget = MemoryBudget.estimate(
+            modelBytes = 491L * 1024 * 1024,
+            nCtx = 2048,
+            layers = 24,
+            hiddenDim = 1024,
+        )
+        assertEquals(96.0, budget.kvCacheMb, 1.0)
+        assertTrue(budget.withinLimit)
+    }
+
+    @Test
+    fun nativeCeilingMatchesKotlinSingleSourceOfTruth() {
+        // MemoryMonitor.cpp kOp7MemoryLimitBytes MUST equal this exact byte count.
+        assertEquals(1_610_612_736L, Op7SystemProfile.MEMORY_LIMIT_BYTES)
+    }
 }

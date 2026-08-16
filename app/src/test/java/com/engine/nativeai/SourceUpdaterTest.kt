@@ -226,4 +226,99 @@ class SourceUpdaterTest {
         assertEquals(0, extractCalls)
         assertTrue(store.chunks.values.flatten().all { it.content == "old" })
     }
+    @Test
+    fun siteIndexesEverySitemapPage() = runBlocking {
+        val store = FakeSourceStore()
+        store.saveSource(
+            Source(0, 1, "FMHY", SourceType.SITE, contentUrl = "https://fmhy.net/sitemap.xml",
+                writeTime = now - 48 * hour, updateAfterHours = 24),
+        )
+        val fetcher = FakeFetcher()
+        fetcher.responses["https://fmhy.net/sitemap.xml"] = FetchResponse(
+            200,
+            ("<urlset>" +
+                "<url><loc>https://fmhy.net/ai</loc></url>" +
+                "<url><loc>https://fmhy.net/audio</loc></url>" +
+                "</urlset>").toByteArray(),
+        )
+        fetcher.responses["https://fmhy.net/ai"] =
+            FetchResponse(200, "<html><body><h1>AI</h1><p>chatbots</p></body></html>".toByteArray())
+        fetcher.responses["https://fmhy.net/audio"] =
+            FetchResponse(200, "<html><body><p>music tools</p></body></html>".toByteArray())
+        val updater = SourceUpdater(SourceRegistry(store), store, fetcher)
+
+        val report = updater.updateOnce(now)
+
+        assertEquals(1, report.updated)
+        val files = store.sourceFiles(1)
+        assertEquals(2, files.size)
+        assertTrue(files.map { it.path }.contains("fmhy.net/ai.html"))
+        val chunkText = store.chunks.values.flatten().joinToString(" ") { it.content }
+        assertTrue(chunkText.contains("chatbots"))
+        assertTrue(chunkText.contains("music tools"))
+        assertEquals(SourceStatus.INDEXED, store.sourceById(1)!!.status)
+    }
+
+    @Test
+    fun siteSitemap304SkipsPageFetch() = runBlocking {
+        val store = FakeSourceStore()
+        store.saveSource(
+            Source(0, 1, "FMHY", SourceType.SITE, contentUrl = "https://fmhy.net/sitemap.xml",
+                etag = "\"v1\"", writeTime = now - 48 * hour, updateAfterHours = 24),
+        )
+        store.upsertSourceFile(SourceFile(0, 1, "fmhy.net/ai.html", blobSha = "x", chunked = true, sizeBytes = 10))
+        val fetcher = FakeFetcher()
+        fetcher.responses["https://fmhy.net/sitemap.xml"] = FetchResponse(304, null, "\"v1\"", null)
+        val updater = SourceUpdater(SourceRegistry(store), store, fetcher)
+
+        val report = updater.updateOnce(now)
+
+        assertEquals(1, report.updated)
+        assertTrue(fetcher.requests.none { it.first.contains("/ai") })
+        assertEquals(SourceStatus.INDEXED, store.sourceById(1)!!.status)
+    }
+
+    @Test
+    fun siteEmptySitemapFailsHonestly() = runBlocking {
+        val store = FakeSourceStore()
+        store.saveSource(
+            Source(0, 1, "FMHY", SourceType.SITE, contentUrl = "https://fmhy.net/sitemap.xml",
+                writeTime = now - 48 * hour, updateAfterHours = 24),
+        )
+        val fetcher = FakeFetcher()
+        fetcher.responses["https://fmhy.net/sitemap.xml"] =
+            FetchResponse(200, "<sitemapindex><sitemap><loc>https://x/s1.xml</loc></sitemap></sitemapindex>".toByteArray())
+        val updater = SourceUpdater(SourceRegistry(store), store, fetcher)
+
+        val report = updater.updateOnce(now)
+
+        assertEquals(1, report.failed)
+        assertEquals(SourceStatus.ERROR, store.sourceById(1)!!.status)
+        assertTrue(store.sourceById(1)!!.error!!.contains("no pages"))
+    }
+
+    @Test
+    fun siteSkipsBadPagesButIndexesGoodOnes() = runBlocking {
+        val store = FakeSourceStore()
+        store.saveSource(
+            Source(0, 1, "FMHY", SourceType.SITE, contentUrl = "https://fmhy.net/sitemap.xml",
+                writeTime = now - 48 * hour, updateAfterHours = 24),
+        )
+        val fetcher = FakeFetcher()
+        fetcher.responses["https://fmhy.net/sitemap.xml"] = FetchResponse(
+            200,
+            ("<urlset><url><loc>https://fmhy.net/ok</loc></url>" +
+                "<url><loc>https://fmhy.net/broken</loc></url></urlset>").toByteArray(),
+        )
+        fetcher.responses["https://fmhy.net/ok"] = FetchResponse(200, "<p>good content</p>".toByteArray())
+        fetcher.responses["https://fmhy.net/broken"] = FetchResponse(500, null)
+        val updater = SourceUpdater(SourceRegistry(store), store, fetcher)
+
+        val report = updater.updateOnce(now)
+
+        assertEquals(1, report.updated)
+        assertEquals(1, store.sourceFiles(1).size)
+        assertTrue(store.sourceFiles(1).single().path.contains("ok"))
+    }
+
 }

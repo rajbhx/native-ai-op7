@@ -1,6 +1,7 @@
 package com.engine.nativeai
 
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -13,6 +14,10 @@ class SourceUpdater(
     private val db: SourceStore,
     private val fetcher: SourceFetcher = HttpSourceFetcher(),
     private val textExtractor: DocumentTextExtractor? = null,
+    /** Ingest-time HNSW population: dormant until a benchmark-validated
+     *  embedder exists (docs/EMBEDDINGS.md) — never a fake vector path. */
+    private val vectorIndex: VectorIndex? = null,
+    private val embeddingProvider: EmbeddingProvider? = null,
 ) {
     data class UpdateReport(
         val skippedBusy: Boolean = false,
@@ -25,6 +30,27 @@ class SourceUpdater(
     @Volatile private var stopRequested = false
 
     val isRunning: Boolean get() = running.get()
+
+    /**
+     * Index freshly stored chunks into the HNSW vector index — only when
+     * BOTH the index and a real embedder report available (gate closed
+     * until the on-device embedding benchmark passes). Failures are
+     * swallowed: search falls back to BM25, ingest must never break on a
+     * vector write.
+     */
+    private suspend fun indexChunksIfReady(fileId: Long) {
+        val index = vectorIndex ?: return
+        val embedder = embeddingProvider ?: return
+        if (!index.available || !embedder.available) return
+        val chunks = db.chunksForFile(fileId)
+        var added = 0
+        for (c in chunks) {
+            val vec = runCatching { embedder.embed(c.content) }.getOrNull() ?: continue
+            index.add(c.id, vec)
+            added++
+        }
+        if (added > 0) index.save()
+    }
 
     /** Request the running update loop to stop after the current source. */
     fun updateStop() {
@@ -82,11 +108,17 @@ class SourceUpdater(
                 SourceType.RAW_TEXT -> 0L
                 SourceType.LOCAL_FILE -> updateLocalFile(s, budgetBytes)
                 SourceType.DOCUMENT -> updateDocument(s, budgetBytes)
+                SourceType.SITE -> updateSiteSource(s, budgetBytes)
             }
             registry.touchRead(s.id)
             spent
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Interrupted refresh (e.g. screen navigation) is not a source
+            // error: leave the row clean and let the next cycle retry.
+            throw e
         } catch (e: Exception) {
             registry.markError(s.id, e.message ?: "update failed")
+            CoreErrors.log.record("source-update", "refresh failed: ${e.message}", e)
             -1L
         }
     }
@@ -127,6 +159,7 @@ class SourceUpdater(
                 SourceFile(id = 0, sourceId = s.id, path = e.path, blobSha = e.sha, sizeBytes = body.size.toLong()),
             )
             db.replaceSourceChunks(s.id, fileId, chunks)
+            indexChunksIfReady(fileId)
             bytes += body.size
         }
         // Drop files removed upstream (uBO keeps index consistent with source).
@@ -160,9 +193,76 @@ class SourceUpdater(
             SourceFile(id = 0, sourceId = s.id, path = "root", blobSha = resp.etag, sizeBytes = body.size.toLong()),
         )
         db.replaceSourceChunks(s.id, fileId, chunks)
+        indexChunksIfReady(fileId)
         db.touchSourceWrite(s.id, null, resp.etag, resp.lastModified, SourceStatus.INDEXED, 1, body.size.toLong())
         return body.size.toLong()
     }
+
+    private suspend fun updateSiteSource(s: Source, budgetBytes: Long): Long {
+        val sitemapUrl = s.contentUrl ?: throw IllegalStateException("site source missing sitemap url")
+        val headers = buildMap {
+            s.etag?.let { put("If-None-Match", it) }
+            s.lastModified?.let { put("If-Modified-Since", it) }
+        }
+        val resp = fetcher.fetch(sitemapUrl, headers)
+        if (resp.notModified) {
+            db.touchSourceWrite(s.id, null, resp.etag ?: s.etag, resp.lastModified ?: s.lastModified,
+                SourceStatus.INDEXED, s.fileCount, s.sizeBytes)
+            return 0L
+        }
+        if (resp.status !in 200..299) throw IllegalStateException("HTTP ${resp.status} for sitemap")
+        val sitemapBody = resp.body ?: throw IllegalStateException("empty sitemap")
+        val urls = SitemapParser.parseUrls(String(sitemapBody, Charsets.UTF_8))
+        if (urls.isEmpty()) {
+            throw IllegalStateException("sitemap yielded no pages (flat <urlset> required)")
+        }
+        val existing = db.sourceFiles(s.id).associate { it.path to (it.blobSha ?: "") }
+        var bytes = 0L
+        for (url in urls) {
+            if (stopRequested) break
+            if (bytes >= budgetBytes) break
+            val pageResp = fetcher.fetch(url)
+            if (pageResp.status !in 200..299) continue // bad page: skip, keep source healthy
+            val page = pageResp.body ?: continue
+            if (page.size > SourceCapabilities.MAX_FILE_BYTES) continue
+            val path = siteFilePath(url)
+            if (!SourceChunker.shouldIngest(page, path)) continue
+            val marker = pageResp.etag ?: "sha-${sha256(page).take(16)}"
+            if (existing[path] == marker) continue // changed-blob-only re-chunking
+            val text = HtmlTextExtractor.toText(String(page, Charsets.UTF_8))
+            if (text.isBlank()) continue
+            val chunks = SourceChunker.chunk(text)
+            val fileId = db.upsertSourceFile(
+                SourceFile(id = 0, sourceId = s.id, path = path, blobSha = marker, sizeBytes = page.size.toLong()),
+            )
+            db.replaceSourceChunks(s.id, fileId, chunks)
+            indexChunksIfReady(fileId)
+            bytes += page.size
+        }
+        val allFiles = db.sourceFiles(s.id)
+        if (allFiles.isEmpty()) {
+            throw IllegalStateException("no pages indexed from site")
+        }
+        db.touchSourceWrite(
+            s.id, null, resp.etag, resp.lastModified,
+            SourceStatus.INDEXED, allFiles.size, allFiles.sumOf { it.sizeBytes },
+        )
+        return bytes.coerceAtLeast(0L)
+    }
+
+    /** Stable per-page file path: host + path, ".html" suffix when none. */
+    private fun siteFilePath(url: String): String {
+        val bare = url.removePrefix("https://").removePrefix("http://")
+        val path = bare.substringBefore('#').substringBefore('?')
+        // Extension detection is on the final path segment only: the host
+        // itself contains dots ("fmhy.net/ai" must become "fmhy.net/ai.html").
+        val tail = path.substringAfterLast('/', "")
+        return if (tail.contains('.')) path else "$path.html"
+    }
+
+    private fun sha256(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { "%02x".format(java.util.Locale.US, it.toInt() and 0xff) }
 
     private suspend fun updateDocument(s: Source, budgetBytes: Long): Long {
         val extractor = textExtractor
@@ -199,6 +299,7 @@ class SourceUpdater(
             SourceFile(id = 0, sourceId = s.id, path = "root", blobSha = marker, sizeBytes = bytes.size.toLong()),
         )
         db.replaceSourceChunks(s.id, fileId, chunks)
+        indexChunksIfReady(fileId)
         db.touchSourceWrite(s.id, marker, null, null, SourceStatus.INDEXED, 1, bytes.size.toLong())
         return text.length.toLong()
     }
@@ -221,6 +322,7 @@ class SourceUpdater(
             SourceFile(id = 0, sourceId = s.id, path = f.name, blobSha = marker, sizeBytes = f.length()),
         )
         db.replaceSourceChunks(s.id, fileId, chunks)
+        indexChunksIfReady(fileId)
         db.touchSourceWrite(s.id, marker, null, null, SourceStatus.INDEXED, 1, f.length())
         return f.length()
     }

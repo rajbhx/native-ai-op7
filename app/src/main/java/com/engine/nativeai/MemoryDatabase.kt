@@ -172,7 +172,7 @@ class MemoryDatabase(context: Context) :
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         // Real migrations only — never drop user data. v3->v4 keeps every
         // existing table and adds the source knowledge base.
-        if (oldVersion < 4) createSourceSchema(db)
+        if (oldVersion < 5) createSourceSchema(db)
     }
 
     // ------------------------------------------------------------------
@@ -499,6 +499,12 @@ class MemoryDatabase(context: Context) :
             "SELECT * FROM source_chunks WHERE id = ?", arrayOf(id.toString()),
         ).use { c -> if (c.moveToFirst()) c.toSourceChunk() else null }
 
+    override fun chunksForFile(fileId: Long): List<SourceChunk> =
+        readableDatabase.rawQuery(
+            "SELECT * FROM source_chunks WHERE source_file_id = ? ORDER BY chunk_index ASC",
+            arrayOf(fileId.toString()),
+        ).use { c -> buildList { while (c.moveToNext()) add(c.toSourceChunk()) } }
+
     override fun sourceFiles(sourceId: Long): List<SourceFile> =
         readableDatabase.rawQuery(
             "SELECT * FROM source_files WHERE source_id = ? ORDER BY path ASC",
@@ -571,7 +577,7 @@ class MemoryDatabase(context: Context) :
         writableDatabase.execSQL(
             """UPDATE sources SET revision = ?, etag = ?, last_modified = ?,
                write_time = ?, last_updated = ?, status = ?, file_count = ?,
-               size_bytes = ? WHERE id = ?""",
+               size_bytes = ?, error = NULL WHERE id = ?""",
             arrayOf<Any?>(
                 revision, etag, lastModified,
                 System.currentTimeMillis(), System.currentTimeMillis(),
@@ -590,6 +596,20 @@ class MemoryDatabase(context: Context) :
 
     /** uBO-style read-time LRU eviction: drop least-recently-read sources. */
     @Synchronized
+    override fun metaGet(key: String): String? =
+        readableDatabase.rawQuery(
+            "SELECT value FROM source_meta WHERE key = ?", arrayOf(key),
+        ).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+
+    @Synchronized
+    override fun metaSet(key: String, value: String) {
+        writableDatabase.execSQL(
+            "INSERT INTO source_meta(key, value) VALUES(?, ?) " +
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            arrayOf(key, value),
+        )
+    }
+
     override fun evictSources(keep: Int): Int {
         val db = writableDatabase
         val total = db.rawQuery("SELECT COUNT(*) FROM sources", null).use { c ->

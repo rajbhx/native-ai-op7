@@ -46,4 +46,31 @@ class ContextManagerTest {
         assertTrue("user prompt must survive", text.contains("u".repeat(40)))
         assertFalse("sources must be dropped before hard truncation", text.contains("Relevant sources:"))
     }
+
+    @Test
+    fun rendersConversationSectionWhenProvided() {
+        val cm = ContextManager(maxTokens = 300)
+        val text = cm.build("s", "u", "mem", emptyList(), conversation = "YOU: hi\nAGENT: hello")
+        assertTrue(text.contains("Prior conversation:"))
+        assertTrue(text.contains("YOU: hi"))
+        assertTrue(text.contains("AGENT: hello"))
+        assertTrue(text.contains("Relevant memory:"))
+    }
+
+    @Test
+    fun conversationDroppedBeforeMemoryDuringCompression() {
+        // Priority: system > user > observations > conversation > memory > sources.
+        val cm = ContextManager(maxTokens = 60)
+        val text = cm.build(
+            "s",
+            "u".repeat(1000),
+            "m".repeat(200),
+            emptyList(),
+            conversation = "conv".repeat(300),
+        )
+        assertTrue("expected <= 51 tokens, got ${cm.estimateTokens(text)}", cm.estimateTokens(text) <= 51)
+        assertFalse("conversation must drop before hard truncation", text.contains("Prior conversation:"))
+        assertFalse("memory must drop before user truncation", text.contains("Relevant memory:"))
+        assertTrue("user prompt must survive", text.contains("u".repeat(40)))
+    }
 }

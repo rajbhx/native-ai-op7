@@ -16,6 +16,10 @@ One measured optimization per revision; never fabricate capabilities.
 - C++17 JNI bridge: mmap GGUF, 4 Kryo Gold/Prime threads, n_ctx 2048, Q8_0 KV.
 - On-device verified: RSS ~729 MB after load; ~1.96 tok/s (contended).
 - In-app GGUF downloader, CPU-thread + context selectors.
+- ✅ Range-resume downloads: cancelled/interrupted attempts keep the .tmp
+  partial; next attempt appends via `Range: bytes=N-`; SHA-256 stays
+  full-file (existing bytes replayed from disk); servers ignoring Range
+  restart cleanly.
 
 ## Phase 2 — Fast local memory 🟡
 - SQLite memory: FTS5 (Android-10 fallback), BM25 ranking, decay, sessions,
@@ -41,13 +45,29 @@ One measured optimization per revision; never fabricate capabilities.
 - Dynamic 1.5 GB memory: `MemoryPlanner` sizes context against live
   available RAM (15% margin, hard 1536 MB cap) before model load; rejects
   with an actionable message instead of crashing.
-- ⬜ System-prompt/persona editing; ⬜ chat/message history; ⬜ live
-  stop/abort UX confirmation on-device (Stop button + [STOPPED] trace done;
-  end-to-end verify pending).
+- ✅ System-prompt/persona editing (SYSTEM PROMPT field in ENGINE SETTINGS,
+  persisted override); ✅ chat/message history (collapsible drawer, reuse);
+  ⬜ live stop/abort UX confirmation on-device (Stop button + [STOPPED]
+  trace done; end-to-end verify pending).
+- ✅ Fallback transparency: when the router substitutes the preferred model,
+  the trace logs `FALLBACK <reason>` (rate-limited / unavailable in mode)
+  and quick-completion status shows the same reason — no silent switching.
+- ✅ Prompt survives process death (`SavedStateHandle`; model selection was
+  already persisted in prefs).
 
-## Phase 4 — Verified learning dataset pipeline ⬜
-- ⬜ Success-filtered synthetic JSONL dataset generation (100+ pairs gate).
-- ⬜ Dataset quality/eligibility checks; external-training export first.
+## Phase 10 — Skill engine 🟡
+- ✅ Skills wired into the agent system prompt by task type (`skillFor`).
+- ✅ SKILLS panel in ENGINE SETTINGS: SEEDED/CUSTOM badges, create/edit/
+  delete for user skills (built-ins read-only; JSON-persisted; empty list
+  re-seeds defaults).
+- ⬜ Skill versioning / reuse scoring (later).
+
+## Phase 4 — Verified learning dataset pipeline 🟡
+- ✅ Verified-experience JSONL export + dedupe + min-pair gate
+  (`SelfLearningPipeline`), surfaced in Diagnostics → Export dataset with
+  honest LoRA-eligibility reasons (never silently trains).
+- ⬜ On-device volume gate (100+ verified pairs) + quality scoring before
+  any external-training handoff.
 
 ## Phase 5 — Resource-aware background service 🟡
 - `EngineForegroundService` (specialUse) holds engine + memory ✅.
@@ -87,22 +107,29 @@ One measured optimization per revision; never fabricate capabilities.
 - Interfaces over concrete deps: ModelProvider ✅, Tool/ToolRegistry ✅,
   ExecutionBackend ✅, SearchProvider ✅; InferenceBackend, MemoryProvider,
   FileSystemProvider, DiagnosticsProvider ⬜.
+- ✅ Robolectric test infra: Context-bound unit tests (ModelPreferences
+  SharedPrefs) run on the JVM; test-only dependency, no APK impact.
+- ✅ Golden source catalog: `docs/GOLDEN-SOURCE-CATALOG.md` extended with
+  agent-tooling and build/CI sections + license/fit analysis.
 - Each new feature must justify RAM, CPU, storage, startup, battery, APK
   size. Unknown metadata stays UNKNOWN. No permanent daemons/processes
   without justification.
 
 ## Immediate next (ordered)
-1. On-device acceptance of the current build: settings sheet now scrolls
+1. CI verification of the golden wave (resume, fallback transparency,
+   process-death survival, gated ingest indexing, skills panel, dataset
+   export, Robolectric) — static checks done, build not yet dispatched.
+2. On-device acceptance of the current build: settings sheet now scrolls
    (Download/Stats/Start service reachable), startup status reflects the
    real library, Stop mid-generation + immediate re-run no longer overlaps
    the native engine (SIGSEGV fix, field note A42).
-2. Verify remote persistence across restart, intent `--es prompt` hook,
+3. Verify remote persistence across restart, intent `--es prompt` hook,
    remote Send routing; observe DiagnosticsDialog values (real
    measurements only).
-3. Run user tests 1–3 (math routing, ReAct memory loop, 2048-ctx sustained
+4. Run user tests 1–3 (math routing, ReAct memory loop, 2048-ctx sustained
    generation) and record results + field note A44+.
-4. Phase 7 sweep (threads/GPU layers) → Vulkan/NNAPI decision.
-5. Tools panel + service-state UI; then learning dataset pipeline.
+5. Phase 7 sweep (threads/GPU layers) → Vulkan/NNAPI decision.
+6. Tools panel + service-state UI; then learning dataset pipeline.
 
 ## Definition of done
 UI works · runtime/model state correct · errors translated · memory within
@@ -121,6 +148,9 @@ capabilities · tests/build pass · measured on device.
   for knowledge-seeking tasks (ContextManager sources slot; compression
   order obs → memory → sources → user; system prompt untouched).
 - ✅ S6 MNN runtime probe + S7 USearch vector index (see Phase 7).
+- ✅ Ingest-time vector indexing wired: `SourceUpdater.indexChunksIfReady`
+  embeds + adds chunks to the HNSW index the moment the embedding gate
+  opens; dormant by design until then (`chunksForFile` on SourceStore).
 - ⬜ On-device benchmark gate → MNN embedder/intent model + vector hybrid
   search + embedding-backed memory (Phase 2 vector retrieval reopens).
 - ⬜ On-device UI verification: Sources rows, DOCUMENT add, startup refresh,

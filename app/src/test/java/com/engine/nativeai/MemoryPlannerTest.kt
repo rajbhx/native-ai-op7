@@ -42,4 +42,26 @@ class MemoryPlannerTest {
         val plan = MemoryPlanner.plan(modelBytes = 200L * mb, nCtx = 2048, availRamBytes = 4L * 1024 * mb)
         assertTrue(plan.withinBudget)
     }
+
+    @Test
+    fun qwen1bKvEstimateMatchesHandMath() {
+        val plan = MemoryPlanner.plan(
+            modelBytes = 491L * mb,
+            nCtx = 2048,
+            availRamBytes = 6L * 1024 * mb,
+            layers = 24,
+            hiddenDim = 1024,
+        )
+        // 2 (K+V) * 2048 ctx * 24 layers * 1024 hidden * 1 byte = ~96 MB
+        assertEquals(96.0, plan.kvCacheMb, 1.0)
+        assertEquals(2048, plan.maxSafeNctx)
+    }
+
+    @Test
+    fun realMetadataNeverShrinksSafeContext() {
+        val withDefaults = MemoryPlanner.plan(491L * mb, 2048, 6L * 1024 * mb)
+        val withMeta = MemoryPlanner.plan(491L * mb, 2048, 6L * 1024 * mb, layers = 24, hiddenDim = 1024)
+        assertTrue("measured geometry must not over-estimate KV", withMeta.kvCacheMb < withDefaults.kvCacheMb)
+        assertTrue(withMeta.maxSafeNctx >= withDefaults.maxSafeNctx)
+    }
 }

@@ -15,6 +15,8 @@ interface ModelPreferencesStore {
     var zenBaseUrl: String
     var terminalEnabled: Boolean
     var terminalAllowlist: Set<String>
+    var toolAlwaysAllow: Set<String>
+    var firstRunDismissed: Boolean
     var systemPromptOverride: String?
     fun favorites(): Set<String>
     fun isFavorite(id: String): Boolean
@@ -29,6 +31,8 @@ class InMemoryModelPreferences : ModelPreferencesStore {
     override var zenBaseUrl: String = ModelCatalog.ZEN_BASE_URL
     override var terminalEnabled: Boolean = false
     override var terminalAllowlist: Set<String> = emptySet()
+    override var toolAlwaysAllow: Set<String> = emptySet()
+    override var firstRunDismissed: Boolean = false
     override var systemPromptOverride: String? = null
     private val favs = mutableSetOf<String>()
     override fun favorites(): Set<String> = favs.toSet()
@@ -82,6 +86,18 @@ class ModelPreferences(context: Context) : ModelPreferencesStore {
         get() = prefs.getStringSet("terminal_allowlist", emptySet()) ?: emptySet()
         set(value) {
             prefs.edit().putStringSet("terminal_allowlist", value).apply()
+        }
+
+    override var toolAlwaysAllow: Set<String>
+        get() = prefs.getStringSet("tool_always_allow", emptySet()) ?: emptySet()
+        set(value) {
+            prefs.edit().putStringSet("tool_always_allow", value).apply()
+        }
+
+    override var firstRunDismissed: Boolean
+        get() = prefs.getBoolean("first_run_dismissed", false)
+        set(value) {
+            prefs.edit().putBoolean("first_run_dismissed", value).apply()
         }
 
     override var systemPromptOverride: String?

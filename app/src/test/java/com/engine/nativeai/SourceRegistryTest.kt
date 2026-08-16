@@ -43,4 +43,40 @@ class SourceRegistryTest {
         registry.removeSource(id)
         assertTrue(store.sources().isEmpty())
     }
+    @Test
+    fun catalogUpgradePrunesRemovedSeedsOnce() {
+        val store = FakeSourceStore()
+        store.saveSource(Source(0, 1, "Termux", SourceType.GITHUB_REPO, owner = "termux", repo = "termux-app"))
+        store.saveSource(Source(0, 1, "llama.cpp", SourceType.GITHUB_REPO))
+        store.saveSource(Source(0, 1, "uBlock Origin", SourceType.GITHUB_REPO))
+        store.saveSource(Source(0, 1, "MemPalace", SourceType.GITHUB_REPO))
+        store.saveSource(Source(0, 1, "LiteRT", SourceType.GITHUB_REPO))
+        store.saveSource(Source(0, 1, "My Custom Source", SourceType.RAW_TEXT))
+        val registry = SourceRegistry(store)
+        val catalog = listOf(
+            SourceRegistry.SeedSource("Knowledge", "FMHY", SourceType.SITE, contentUrl = "https://fmhy.net/sitemap.xml"),
+            SourceRegistry.SeedSource("My Projects", "OP7 Special Build Playbook", SourceType.GITHUB_REPO, owner = "rajbhx", repo = "op7-special-build-playbook"),
+        )
+
+        val added = registry.seed(catalog, catalogVersion = 2)
+
+        val titles = store.sources().map { it.title }
+        assertEquals(listOf("My Custom Source", "FMHY", "OP7 Special Build Playbook"), titles)
+        assertEquals(2, added)
+        // Second run (same version): nothing pruned, nothing added.
+        assertEquals(0, registry.seed(catalog, catalogVersion = 2))
+        assertEquals(3, store.sources().size)
+        // Upgrading from a fresh DB with no legacy rows is a no-op too.
+        assertEquals("2", store.metaGet("source_catalog_version"))
+    }
+
+    @Test
+    fun seedDefaultVersionDoesNotPrune() {
+        val store = FakeSourceStore()
+        store.saveSource(Source(0, 1, "Termux", SourceType.GITHUB_REPO))
+        val registry = SourceRegistry(store)
+        registry.seed(emptyList(), catalogVersion = 1)
+        assertEquals(1, store.sources().size)
+    }
+
 }

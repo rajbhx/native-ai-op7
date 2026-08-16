@@ -3,6 +3,9 @@ name: Build
 on:
   workflow_dispatch:
     inputs:
+      # Reserved for the Phase-8 release path (R8/signing). Today every
+      # dispatch builds the same debug APK; keep the input so callers and
+      # AGENTS.md stay compatible until that path exists.
       fast:
         description: "Fast iteration (no R8). Use true during phases 1-3."
         type: boolean
@@ -14,13 +17,20 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+# Golden-standard security: the workflow only reads the repo, never writes.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 1
+          persist-credentials: false
 
       - uses: actions/setup-java@v5
         with:
@@ -64,8 +74,21 @@ jobs:
       - name: Build debug APK (arm64-v8a only)
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
-      - name: JVM unit tests (classifier, parser, router, expr)
-        run: ./gradlew :app:testDebugUnitTest --no-daemon
+      # Full JVM suite: agent/router/memory/integrity/skills JDBC tests plus
+      # Robolectric Context-bound tests (ModelPreferences SharedPrefs). Keep
+      # this in sync with app/build.gradle.kts testImplementation entries.
+      - name: JVM unit tests (agent, router, memory, integrity, skills, Robolectric)
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+          retention-days: 14
 
       - name: Validate APK badging (testOnly + ABI gate)
         run: |
@@ -104,3 +127,4 @@ jobs:
           path: |
             app/build/outputs/apk/debug/*.apk
             SHA256SUMS.txt
+          retention-days: 14
