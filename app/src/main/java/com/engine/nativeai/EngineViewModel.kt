@@ -231,6 +231,8 @@ class EngineViewModel(
         // two overlapping runs; the finally block always resets it.
         _running.value = true
         runJob = vmScope.launch(Dispatchers.Default) {
+            // Hoisted so the failure handler can report the routed provider.
+            var routedId: String? = null
             try {
                 val ctx = appContext ?: return@launch
                 val reg = registry ?: return@launch
@@ -254,6 +256,7 @@ class EngineViewModel(
                     _engineState.value = EngineUiState.ERROR
                     return@launch
                 }
+                routedId = descriptor.id
                 if (descriptor.kind == ModelKind.LOCAL &&
                     !ensureLocalLoaded(localLibrary?.resolve(descriptor.id), contextSize, threads, modelsDir)
                 ) {
@@ -302,7 +305,7 @@ class EngineViewModel(
                 _status.value = "generation stopped"
                 _engineState.value = EngineUiState.READY
             } catch (e: Exception) {
-                healthMonitor.reportFailure(descriptor.id, e.message ?: "generate failed")
+                healthMonitor.reportFailure(routedId ?: "unknown", e.message ?: "generate failed")
                 CoreErrors.log.record("generate", "generate failed: ${e.message}", e)
                 _status.value = "generate failed: ${e.message}"
                 _engineState.value = EngineUiState.ERROR

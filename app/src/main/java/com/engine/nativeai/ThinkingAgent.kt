@@ -129,7 +129,7 @@ class ThinkingAgent(
                     conversation = priorConversation,
                 )
                 val request = ModelRequest(
-                    system = systemPromptOverride ?: systemPrompt(),
+                    system = systemPromptOverride ?: systemPrompt(skill),
                     prompt = ContextAdapter.fit(userCtx.trim(), descriptor.contextLength ?: 2048),
                     maxTokens = config.maxTokens,
                     temperature = config.temperature,
@@ -240,7 +240,7 @@ class ThinkingAgent(
         emit(AgentEvent.Error("max iterations ($maxIterations) reached without a final answer"))
     }
 
-    private fun systemPrompt(): String =
+    private fun systemPrompt(skill: Skill?): String =
         buildString {
             append(
                 """

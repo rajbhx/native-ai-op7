@@ -75,6 +75,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
@@ -618,7 +619,7 @@ fun EngineScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = prompt,
-                onValueChange = { prompt = it },
+                onValueChange = { vm.setPrompt(it) },
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("What do you want me to do?", color = OpTextSecondary) },
                 minLines = 2,

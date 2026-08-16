@@ -596,7 +596,6 @@ class MemoryDatabase(context: Context) :
 
     /** uBO-style read-time LRU eviction: drop least-recently-read sources. */
     @Synchronized
-    @Synchronized
     override fun metaGet(key: String): String? =
         readableDatabase.rawQuery(
             "SELECT value FROM source_meta WHERE key = ?", arrayOf(key),
