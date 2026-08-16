@@ -168,11 +168,12 @@ class ThinkingAgent(
                         return@flow
                     }
                     descriptor = fallback
-                    provider = registry.providerFor(descriptor)
-                    if (provider == null) {
+                    val fallbackProvider = registry.providerFor(descriptor)
+                    if (fallbackProvider == null) {
                         emit(AgentEvent.Error("provider for ${descriptor.id} not registered"))
                         return@flow
                     }
+                    provider = fallbackProvider
                     val routedReason = buildString {
                         if (preferredId != null && preferredId != descriptor.id) {
                             val why = router.lastError(preferredId).ifEmpty { "not available in mode ${router.mode}" }
