@@ -436,3 +436,18 @@ sections:
         cause: "1) tests appended after a premature class-closing brace sat outside the class (JUnit reflection fails); 2) ModelManifest.record lowercases sha256, test expected uppercase; 3) siteFilePath checked path.contains('.') on host+path, so fmhy.net/ai got no .html and shouldIngest rejected ext 'net/ai'"
         solution: "remove premature braces (re-close at EOF); assert lowercase sha (abc123); extension detection on final path segment only (path.substringAfterLast('/')) so fmhy.net/ai.html is ingestible; run testDebugUnitTest in CI before merge"
         tags: [testing, kotlin, structure, sources, ci]
+      - id: A87
+        problem: "installing a CI APK onto the OP7 from proot: /sdcard is isolated, shizuku forwards no stdin and shares no paths, argv base64 hits ARG_MAX"
+        cause: "proot rootfs is isolated from the real Android filesystem; host-bridge shizuku only accepts a JSON command string"
+        solution: "python3 -m http.server bound to 0.0.0.0 in proot + shizuku sh -c 'curl -s -o /sdcard/...' (device and proot share wlan0); verify SHA-256 first"
+        tags: [install, shizuku, proot, apk, transfer]
+      - id: A88
+        problem: "pm install -r failed: INSTALL_FAILED_UPDATE_INCOMPATIBLE signatures do not match"
+        cause: "new CI keystore rotation changed the signing cert (6085c8a0 -> 415940f0)"
+        solution: "uninstall + reinstall is the signature-rotation path; GGUF models live in /sdcard/Download (scoped storage) so they survive uninstall; stage APK in /data/local/tmp"
+        tags: [install, signature, keystore, scoped-storage]
+      - id: A89
+        problem: "app header hardcoded SD855 8 GB while GOLD-STANDARD-SPEC says RAM 6-8 GB device variants"
+        cause: "EngineScreen.kt:505 literal"
+        solution: "chip now reads SD855 6-8 GB; README + spec already correct"
+        tags: [hardware, golden-standard, ui, spec]

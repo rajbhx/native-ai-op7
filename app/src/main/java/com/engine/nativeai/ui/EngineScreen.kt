@@ -502,7 +502,7 @@ fun EngineScreen(
                     )
                 }
                 Text("OP7", color = OpTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                Text("SD855 \u00b7 8 GB", color = OpTextSecondary, fontSize = 9.sp)
+                Text("SD855 \u00b7 6-8 GB", color = OpTextSecondary, fontSize = 9.sp)
             }
             Spacer(Modifier.width(8.dp))
             Surface(
