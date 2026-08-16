@@ -18,14 +18,6 @@
       "updateAfterHours": 24
     },
     {
-      "collection": "AI",
-      "title": "LiteRT",
-      "type": "GITHUB_REPO",
-      "owner": "google-ai-edge",
-      "repo": "litert",
-      "updateAfterHours": 48
-    },
-    {
       "collection": "My Projects",
       "title": "OP7 Special Build Playbook",
       "type": "GITHUB_REPO",
@@ -48,6 +40,14 @@
       "owner": "MemPalace",
       "repo": "mempalace",
       "updateAfterHours": 48
+    },
+    {
+      "collection": "Knowledge",
+      "title": "FMHY",
+      "type": "GITHUB_REPO",
+      "owner": "fmhy",
+      "repo": "FMHY",
+      "updateAfterHours": 24
     }
   ]
 }
