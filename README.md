@@ -1,7 +1,7 @@
 # native-ai-op7
 
 Native self-learning agentic AI engine for Mobile/Edge — OnePlus 7 edition
-(Snapdragon 855: Kryo 485 1+3+4, Adreno 640, 6 GB RAM, UFS 3.0).
+(Snapdragon 855: Kryo 485 1+3+4, Adreno 640, 8 GB RAM, UFS 3.0).
 
 Stack: Kotlin (Compose UI + Foreground Service) + C++17 (llama.cpp JNI bridge,
 GGML CPU dispatch, optional Vulkan later) + SQLite3 (FTS5 memory) + CMake.
@@ -23,6 +23,10 @@ arm64-v8a only. **Builds run on GitHub Actions, never locally.**
   holds engine + memory; RSS watchdog; learning eligibility gate.
 - **Phase 6/8** skills + sessions + `SelfLearningPipeline` (verified JSONL
   export, LoRA eligibility — never silently trains).
+- **Phase 9** source knowledge base: uBO-style seed catalog (FMHY +
+  playbook only), SITE/GitHub/WEB/DOCUMENT/RAW_TEXT/LOCAL ingestion,
+  FTS5 chunks + hybrid agent context, `SourcesScreen` + `source_search`
+  tool, startup auto-refresh, honest rate-limit errors.
 - **Blueprint Phase 6** UI: Jetpack Compose OxygenOS "NEVER SETTLE" dashboard —
   Model Hub, segmented mode selector, Live Agent Trace, Horizon Light.
 
@@ -86,6 +90,19 @@ arm64-v8a only. **Builds run on GitHub Actions, never locally.**
   `docs/EMBEDDINGS.md` (no fake vector capability). Chunks are indexed at
   ingest (`SourceUpdater.indexChunksIfReady`) the moment the embedding gate
   opens; until then the path is dormant by design.
+- **Core error log**: every recorded failure lands in `ErrorLog` (ERRORS
+  tab in the trace zone) — diagnostics probes fail closed, never crash.
+- **GGUF metadata**: `GgufMetadataReader`/`GgufMetaCache` reads real GGUF
+  header values (layers, hidden dim, context) for the model card and drives
+  `MemoryBudget` from measured values instead of guesses.
+- **Source knowledge base (Phase 9)**: seed catalog is FMHY + playbook only
+  (external knowledge for retrieval; `SourceSearchTool` cites
+  `[source/file]`). SITE ingestion (`SitemapParser` + `HtmlTextExtractor`)
+  plus GitHub/WEB/DOCUMENT/RAW_TEXT/LOCAL types; `SourcesScreen` search +
+  empty states + ADD dialogs for every type (FlowRow, no clipping);
+  startup auto-refresh (`updateOnce`, bounded/online-only); GitHub
+  403/429 → honest rate-limit errors; stale errors clear on successful
+  refresh; hit titles stay neutral.
 - Source catalog: `docs/GOLDEN-SOURCE-CATALOG.md`.
 
 ## Pinned dependency
