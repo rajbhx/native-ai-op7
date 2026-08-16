@@ -49,6 +49,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
@@ -60,6 +62,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +74,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -1920,40 +1924,7 @@ private fun StepRow(text: String, color: Color) {
 
 
 @Composable
-internal fun PillButton(
-    text: String,
-    modifier: Modifier = Modifier,
-    primary: Boolean = false,
-    enabled: Boolean = true,
-    loading: Boolean = false,
-    onClick: () -> Unit,
-) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.defaultMinSize(minHeight = 48.dp),
-        shape = RoundedCornerShape(24.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (primary) OpRed else OpCard,
-            contentColor = OpText,
-            disabledContainerColor = OpCard.copy(alpha = 0.4f),
-            disabledContentColor = OpTextSecondary,
-        ),
-        border = if (primary) null else BorderStroke(1.dp, OpDivider),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(14.dp),
-                    color = if (primary) Color.White else OpTextSecondary,
-                    strokeWidth = 2.dp,
-                )
-                Spacer(Modifier.width(6.dp))
-            }
-            Text(text)
-        }
-    }
-}
+
 
 @Composable
 internal fun HistorySessionCard(session: ChatSession, onReuse: (String) -> Unit) {
@@ -2000,31 +1971,6 @@ private fun formatHistoryTime(ms: Long): String =
         .format(java.util.Date(ms))
 
 @Composable
-internal fun ValuePill(
-    text: String,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    Text(
-        text = text,
-        color = if (selected) OpText else OpTextSecondary,
-        fontSize = 12.sp,
-        maxLines = 1,
-        modifier = modifier
-            .background(
-                if (selected) OpCard else Color.Transparent,
-                RoundedCornerShape(20.dp),
-            )
-            .border(
-                BorderStroke(1.dp, if (selected) OpBorder else OpDivider),
-                RoundedCornerShape(20.dp),
-            )
-            .defaultMinSize(minHeight = 48.dp)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-    )
-}
 
 private fun availableRamBytes(context: Context): Long {
     val am = context.getSystemService(android.app.ActivityManager::class.java)
