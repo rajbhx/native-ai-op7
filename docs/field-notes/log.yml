@@ -431,3 +431,8 @@ sections:
         cause: "SITE-type FMHY only existed on the deleted branch; main has no SourceType.SITE"
         solution: "sources.json -> FMHY (GITHUB_REPO fmhy/FMHY) + playbook only; ROADMAP S4 updated; CI green on main"
         tags: [sources, catalog, fmhy, assets]
+      - id: A86
+        problem: "250 JVM tests ran but 5 failed on CI: ContextManagerTest/MemoryBudgetTest initializationError, ModelManifestTest ComparisonFailure, 2 SourceUpdaterTest site asserts"
+        cause: "1) tests appended after a premature class-closing brace sat outside the class (JUnit reflection fails); 2) ModelManifest.record lowercases sha256, test expected uppercase; 3) siteFilePath checked path.contains('.') on host+path, so fmhy.net/ai got no .html and shouldIngest rejected ext 'net/ai'"
+        solution: "remove premature braces (re-close at EOF); assert lowercase sha (abc123); extension detection on final path segment only (path.substringAfterLast('/')) so fmhy.net/ai.html is ingestible; run testDebugUnitTest in CI before merge"
+        tags: [testing, kotlin, structure, sources, ci]
