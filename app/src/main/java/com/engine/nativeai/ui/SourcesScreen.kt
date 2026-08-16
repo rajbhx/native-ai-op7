@@ -6,6 +6,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -215,9 +217,18 @@ fun SourcesScreen(onBack: () -> Unit) {
         if (query.isNotBlank()) {
             Text("KNOWLEDGE HITS", color = OpTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
-            LazyColumn {
-                items(hits) { hit ->
-                    SourceHitRow(hit)
+            if (hits.isEmpty()) {
+                Text(
+                    "No matches found \u2014 nothing indexed yet. Tap REFRESH or ADD to index sources.",
+                    color = OpTextSecondary,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            } else {
+                LazyColumn {
+                    items(hits) { hit ->
+                        SourceHitRow(hit)
+                    }
                 }
             }
         } else {
@@ -406,7 +417,7 @@ private fun SourceHitRow(hit: SourceSearchHit) {
         Column(Modifier.padding(12.dp)) {
             Text(
                 "${hit.sourceTitle} / ${hit.filePath}",
-                color = OpRed,
+                color = OpText,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
             )
@@ -416,6 +427,7 @@ private fun SourceHitRow(hit: SourceSearchHit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AddSourceDialog(
     onDismiss: () -> Unit,
@@ -448,7 +460,7 @@ private fun AddSourceDialog(
         title = { Text("ADD SOURCE", color = OpText, fontWeight = FontWeight.Bold) },
         text = {
             Column {
-                Row {
+                FlowRow {
                     listOf(SourceType.GITHUB_REPO, SourceType.WEB_PAGE, SourceType.RAW_TEXT, SourceType.LOCAL_FILE, SourceType.DOCUMENT)
                         .forEach { t ->
                             Row(
