@@ -10,9 +10,6 @@ on:
         description: "Fast iteration (no R8). Use true during phases 1-3."
         type: boolean
         default: true
-  push:
-    branches: [main]
-
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
