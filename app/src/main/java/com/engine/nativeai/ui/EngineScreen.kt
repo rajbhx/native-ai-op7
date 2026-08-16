@@ -56,7 +56,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -66,7 +65,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -94,33 +92,21 @@ import android.content.ClipboardManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.engine.nativeai.AgentEvent
 import com.engine.nativeai.ApprovalDecision
 import com.engine.nativeai.EngineUiState
 import com.engine.nativeai.EngineViewModel
-import com.engine.nativeai.ToolApprovalRequest
-import com.engine.nativeai.AgentState
-import com.engine.nativeai.AgentTask
-import com.engine.nativeai.CalculatorTool
 import com.engine.nativeai.CoreErrors
 import com.engine.nativeai.ErrorEntry
 import com.engine.nativeai.ChatHistory
 import com.engine.nativeai.ChatSession
 import com.engine.nativeai.EngineForegroundService
-import com.engine.nativeai.EngineConfig
 import com.engine.nativeai.EngineServiceState
-import com.engine.nativeai.FileSearchTool
-import com.engine.nativeai.FinalAnswerTool
-import com.engine.nativeai.GenerationConfig
 import com.engine.nativeai.ExecutionManager
-import com.engine.nativeai.ExecutionPolicy
 import com.engine.nativeai.FrameJankMonitor
 import com.engine.nativeai.ImportResult
-import com.engine.nativeai.LocalFallbackProvider
 import com.engine.nativeai.LocalModelImporter
 import com.engine.nativeai.LocalModelLibrary
 import com.engine.nativeai.LocalModelProvider
-import com.engine.nativeai.MemoryDatabase
 import com.engine.nativeai.GgufMetaCache
 import com.engine.nativeai.MemoryPlanner
 import com.engine.nativeai.ModelBenchmark
@@ -130,25 +116,18 @@ import com.engine.nativeai.ModelDownloader
 import com.engine.nativeai.DownloadResult
 import com.engine.nativeai.SelfLearningPipeline
 import com.engine.nativeai.Skill
-import com.engine.nativeai.MemorySearchTool
-import com.engine.nativeai.ModelCatalog
 import com.engine.nativeai.ModelAvailability
 import com.engine.nativeai.ModelCostTier
 import com.engine.nativeai.ModelDiscoveryService
 import com.engine.nativeai.ModelKind
 import com.engine.nativeai.ModelDescriptor
 import com.engine.nativeai.ModelStatus
-import com.engine.nativeai.ModelInfoTool
-import com.engine.nativeai.ModelRequest
 import com.engine.nativeai.ModelRegistry
 import com.engine.nativeai.ModelPreferencesStore
-import com.engine.nativeai.ModelRouter
-import com.engine.nativeai.ModelStreamEvent
 import com.engine.nativeai.MnnBackend
 import com.engine.nativeai.RuntimeKind
 import com.engine.nativeai.USearchVectorIndex
 import com.engine.nativeai.OpenAICompatibleProvider
-import com.engine.nativeai.PrivacyMode
 import com.engine.nativeai.ProviderRegistry
 import com.engine.nativeai.RemoteProviderBootstrap
 import com.engine.nativeai.NativeEngine
@@ -156,15 +135,9 @@ import com.engine.nativeai.RoutingMode
 import com.engine.nativeai.RuntimeDiagnostics
 import com.engine.nativeai.DiagnosticsSnapshot
 import com.engine.nativeai.StoragePaths
-import com.engine.nativeai.SystemInfoTool
-import com.engine.nativeai.TaskType
-import com.engine.nativeai.TerminalTool
 import com.engine.nativeai.TermuxStatus
-import com.engine.nativeai.ThinkingAgent
 import com.engine.nativeai.Toolbox
 import com.engine.nativeai.ToolPermission
-import com.engine.nativeai.ToolRegistry
-import com.engine.nativeai.WebSearchTool
 import java.io.File
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -664,7 +637,7 @@ fun EngineScreen(
         }
         Spacer(Modifier.height(10.dp))
 
-                // ---------------- PROMPT (primary interaction) ----------------
+        // ---------------- PROMPT (primary interaction) ----------------
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = prompt,

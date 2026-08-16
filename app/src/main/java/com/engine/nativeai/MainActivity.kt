@@ -2,23 +2,19 @@ package com.engine.nativeai
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -28,13 +24,10 @@ import com.engine.nativeai.ui.EngineScreen
 import com.engine.nativeai.ui.MemoryScreen
 import com.engine.nativeai.ui.SourcesScreen
 import com.engine.nativeai.ui.OxygenOSTheme
-import com.engine.nativeai.ui.OpBg
 import com.engine.nativeai.ui.OpCard
 import com.engine.nativeai.ui.OpText
 import com.engine.nativeai.ui.OpTextSecondary
 import com.engine.nativeai.ui.OpRed
-import com.engine.nativeai.ui.OpBorder
-import com.engine.nativeai.ui.OpDivider
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
