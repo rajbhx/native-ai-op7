@@ -110,8 +110,9 @@ budget · offline behavior preserved · architecture modular · no fake
 capabilities · tests/build pass · measured on device.
 
 ## Phase 9 — Source knowledge base + runtime layer 🟡 (track C)
-- ✅ S4 seed catalog (uBlock Origin, MemPalace, Termux, llama.cpp, LiteRT,
-  playbook) — uBO update-after-hours model, idempotent first-run seeding.
+- ✅ S4 seed catalog (FMHY + playbook only — sources are external knowledge
+  for the local knowledge base; uBO update-after-hours model, idempotent
+  first-run seeding).
 - ✅ S2 GitHub rate-limit visibility (403/429 → clear error, honest state).
 - ✅ S1 DOCUMENT ingestion via Termux `pdftotext`; explicit error when the
   extractor is unavailable (metadata-only, no fabricated capability).
