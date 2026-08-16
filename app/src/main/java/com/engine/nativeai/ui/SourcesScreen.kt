@@ -364,7 +364,7 @@ private fun SourceRow(
                 color = OpTextSecondary,
                 fontSize = 11.sp,
             )
-            if (s.error != null) {
+            if (s.status == SourceStatus.ERROR && s.error != null) {
                 Spacer(Modifier.height(4.dp))
                 Text(s.error, color = OpRed, fontSize = 11.sp)
             }

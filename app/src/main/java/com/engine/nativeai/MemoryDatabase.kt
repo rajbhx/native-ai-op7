@@ -571,7 +571,7 @@ class MemoryDatabase(context: Context) :
         writableDatabase.execSQL(
             """UPDATE sources SET revision = ?, etag = ?, last_modified = ?,
                write_time = ?, last_updated = ?, status = ?, file_count = ?,
-               size_bytes = ? WHERE id = ?""",
+               size_bytes = ?, error = NULL WHERE id = ?""",
             arrayOf<Any?>(
                 revision, etag, lastModified,
                 System.currentTimeMillis(), System.currentTimeMillis(),
