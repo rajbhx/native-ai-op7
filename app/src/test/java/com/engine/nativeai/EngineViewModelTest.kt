@@ -47,6 +47,12 @@ class EngineViewModelTest {
 
     private fun newVm() = EngineViewModel()
 
+    /** Exposes the protected ViewModel lifecycle hook for tests. */
+    private class TestEngineViewModel(savedState: SavedStateHandle = SavedStateHandle()) :
+        EngineViewModel(savedState) {
+        fun invokeOnCleared() = onCleared()
+    }
+
     @Test
     fun initialStateIsEmptyAndReady() {
         val vm = newVm()
@@ -125,7 +131,7 @@ class EngineViewModelTest {
     @Test
     fun sendQuickWithBlankPromptIsNoop() = runTest {
         val vm = newVm()
-        vm.sendQuick(RoutingMode.AUTO, null, 2048, 4, File("/tmp/models"))
+        vm.sendQuick(RoutingMode.HYBRID, null, 2048, 4, File("/tmp/models"))
         assertFalse(vm.running.value)
         assertEquals(EngineUiState.READY, vm.engineState.value)
     }
@@ -134,7 +140,7 @@ class EngineViewModelTest {
     fun sendQuickWithoutAttachIsNoop() = runTest {
         val vm = newVm()
         vm.setPrompt("hello")
-        vm.sendQuick(RoutingMode.AUTO, null, 2048, 4, File("/tmp/models"))
+        vm.sendQuick(RoutingMode.HYBRID, null, 2048, 4, File("/tmp/models"))
         assertFalse(vm.running.value)
         assertEquals(EngineUiState.READY, vm.engineState.value)
     }
@@ -157,8 +163,8 @@ class EngineViewModelTest {
 
     @Test
     fun onClearedCompletesPendingApprovalWithDeny() = runTest {
-        val vm = newVm()
-        vm.onCleared()
+        val vm = TestEngineViewModel()
+        vm.invokeOnCleared()
         // No crash, gate (if any) resolved DENY — run state stays safe.
         assertNull(vm.pendingApproval.value)
     }

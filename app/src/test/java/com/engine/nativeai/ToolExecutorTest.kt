@@ -1,6 +1,7 @@
 package com.engine.nativeai
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
@@ -121,7 +122,7 @@ class ToolExecutorTest {
             memory = null,
             onApproval = { ApprovalDecision.ALLOW_ONCE },
         )
-        val job = kotlinx.coroutines.async { executor.execute("terminal", "slow") }
+        val job = async { executor.execute("terminal", "slow") }
         delay(50)
         job.cancel()
         try {

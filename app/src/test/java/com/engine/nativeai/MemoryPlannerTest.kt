@@ -42,7 +42,6 @@ class MemoryPlannerTest {
         val plan = MemoryPlanner.plan(modelBytes = 200L * mb, nCtx = 2048, availRamBytes = 4L * 1024 * mb)
         assertTrue(plan.withinBudget)
     }
-}
 
     @Test
     fun qwen1bKvEstimateMatchesHandMath() {
@@ -65,3 +64,4 @@ class MemoryPlannerTest {
         assertTrue("measured geometry must not over-estimate KV", withMeta.kvCacheMb < withDefaults.kvCacheMb)
         assertTrue(withMeta.maxSafeNctx >= withDefaults.maxSafeNctx)
     }
+}

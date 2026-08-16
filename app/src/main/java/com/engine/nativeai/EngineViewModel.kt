@@ -39,7 +39,7 @@ data class UiEvent(
  * ViewModel lifetime; the run coroutine lives in the ViewModel scope so a
  * rotation no longer cancels an in-flight agent run.
  */
-class EngineViewModel(
+open class EngineViewModel(
     /** Saved state (bundle) so a process-death recreation restores the
      *  prompt instead of wiping it — golden UX: state survives the process,
      *  not just rotation. Selection already survives via prefs. */
