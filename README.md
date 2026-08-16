@@ -1,7 +1,7 @@
 # native-ai-op7
 
 Native self-learning agentic AI engine for Mobile/Edge — OnePlus 7 edition
-(Snapdragon 855: Kryo 485 1+3+4, Adreno 640, 8 GB RAM, UFS 3.0).
+(Snapdragon 855: Kryo 485 1+3+4, Adreno 640, 6-8 GB RAM, UFS 3.0).
 
 Stack: Kotlin (Compose UI + Foreground Service) + C++17 (llama.cpp JNI bridge,
 GGML CPU dispatch, optional Vulkan later) + SQLite3 (FTS5 memory) + CMake.
