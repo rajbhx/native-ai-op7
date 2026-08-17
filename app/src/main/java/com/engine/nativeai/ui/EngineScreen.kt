@@ -1924,9 +1924,6 @@ private fun StepRow(text: String, color: Color) {
 
 
 @Composable
-
-
-@Composable
 internal fun HistorySessionCard(session: ChatSession, onReuse: (String) -> Unit) {
     Column(
         Modifier
