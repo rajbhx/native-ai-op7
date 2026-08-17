@@ -60,6 +60,7 @@ private val OpColors = darkColorScheme(
     outline = OpDivider,
 )
 
+@Composable
 internal fun PillButton(
     text: String,
     modifier: Modifier = Modifier,
@@ -96,6 +97,7 @@ internal fun PillButton(
 }
 
 
+@Composable
 internal fun ValuePill(
     text: String,
     selected: Boolean,
